@@ -15,11 +15,11 @@ Last updated: current session
 
 ## Architecture Overview
 1. **Discovery and Recon**
-   - Manual DevTools session to capture network traffic, request payloads, authentication headers, pagination behavior, and rate limits.
-   - Document any anti-bot signals (CAPTCHA, session tokens) before coding.
+   - Manual or scripted DevTools-style capture (e.g., Playwright with network logging) to enumerate request payloads, authentication headers, pagination behavior, and rate limits without yet writing the full scraper.
+   - Record any anti-bot signals (CAPTCHA, session tokens) and define how the automation will surface them to the operator.
 2. **ZIP Code Provider**
-   - Build canonical California ZIP list from trusted open data (e.g., USPS, Census).
-   - Persist as CSV/JSON and expose as reusable iterator in code.
+   - Automate retrieval of a canonical California ZIP list from trusted open data (e.g., public Opendatasoft API, Census downloads) using a lightweight ingestion script committed to `scripts/`.
+   - Persist as CSV/JSON and expose as reusable iterator in code; include checks that validate counts and de-duplicate entries.
 3. **Retrieval Layer**
    - Preferred: Playwright (Python) to submit ZIPs, intercept XHR responses, and save raw dealer payloads.
    - Alternate: direct HTTP client (requests/httpx) if locator API is replayable.
@@ -34,6 +34,12 @@ Last updated: current session
 6. **Quality and Observability**
    - Structured logging, retry with exponential backoff, summary report after run.
    - .env driven configuration for endpoints, rate limits, and logging levels.
+
+## Operator Feedback and Progress Reporting
+- Provide a high-level run controller that surfaces stage-based updates (e.g., collecting ZIPs, submitting locator requests, normalizing data, exporting CSV) to stdout and structured logs.
+- Emit progress metrics such as processed ZIP count, dealer records accumulated, and retry/backoff events to keep the operator informed in long runs.
+- When errors or anti-automation blocks occur, display clear instructions on next actions, capture the context in `logs/`, and optionally pause for manual input when `--interactive` is enabled.
+- Persist a run summary artifact (JSON or Markdown) outlining total steps, successes/failures, and manual follow-ups required.
 
 ## Anti-Automation Mitigation Strategy
 - **Detection**: monitor response payloads/status codes for CAPTCHA markers, HTML challenge pages, or unusual HTTP codes (429, 403, 503).
@@ -52,6 +58,7 @@ Last updated: current session
 - [ ] Compile authoritative list of California ZIP codes; validate counts and deduplicate.
 - [ ] Define dealer data model, normalization rules, and deduplication key strategy.
 - [ ] Build proof-of-concept fetcher for a single ZIP including anti-automation detection hooks.
+- [ ] Implement stage-aware run orchestrator that reports progress, surfaces manual-intervention prompts, and stores run summaries.
 - [ ] Implement stateful deduplication and accumulator for merging records across ZIPs.
 - [ ] Add resilient retry/backoff, logging, and manual-intervention prompts when encountering blocks.
 - [ ] Create CSV writer and validation scripts (spot-checks, summary metrics).
@@ -66,4 +73,4 @@ Last updated: current session
 - Confirm whether downstream consumers expect geocoding or map visualization (currently out of scope).
 
 ## Change Log
-- **Current session**: Added anti-automation mitigation plan, clarified backend classification, consolidated architecture summary, curated TODO backlog, scaffolded repository structure.
+- **Current session**: Added anti-automation mitigation plan, clarified backend classification, consolidated architecture summary with automation-first recon/ZIP sourcing guidance, documented operator progress reporting expectations, curated TODO backlog, scaffolded repository structure.
