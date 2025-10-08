@@ -8,6 +8,8 @@
 - Classified the project as backend/data-engineering; no UI beyond CLI tooling is planned.
 - Discovery strategy: use Playwright-based recon script (`scripts/capture_locator_traffic.py`) to log XHR/fetch traffic, capture raw payloads to `data/raw/network/`, and emit YAML summaries before implementing the full scraper.
 - ZIP Provider: automate sourcing of California ZIPs from the `scpike/us-state-county-zip` dataset, filtering to valid 5-digit entries, normalizing city/county casing, and persisting both CSV data and metadata artifacts (`scripts/fetch_ca_zip_codes.py`).
+- Dealer records will capture normalized address/phone/email fields plus Holosun-provided IDs and lat/lng; deduplication hinges on a SHA256 of normalized name + street + city + postal code while tracking first/last seen timestamps for auditability.
+- Request geocoding will rely on offline ZIP centroids bundled with our dataset so Playwright is not required for production runs; Holosun response coordinates remain the authoritative dealer points we export.
 - Operator experience: run controller will report stage-by-stage progress (collecting ZIPs, submitting requests, normalizing, exporting), track metrics, and pause with instructions when anti-automation triggers occur.
 - Data persistence plan: store raw payloads per ZIP for audit, normalize/de-duplicate into an in-memory or SQLite cache, then write `dealers.csv` and `zip_audit.csv` with traceable provenance.
 
@@ -18,13 +20,13 @@
 - Repository scaffolding: structured directories for docs, src, scripts, config, data, logs, tests; `.gitignore` tuned to include curated data artifacts.
 
 ## Current Work State (2025-10-08)
-- Latest changes staged locally (awaiting commit approval): recon script selector updates, new network capture artifacts under `data/raw/network/20251008_*`, and documentation refreshes.
+- Latest changes staged locally (awaiting commit approval): recon script selector updates, new network capture artifacts under `data/raw/network/20251008_*`, and documentation refreshes (now including dealer data model, normalization, deduplication, and geocoding decisions).
 - Playwright recon completed headless runs for ZIPs 94105 (no dealers) and 90001 (one dealer), confirming the POST `https://holosun.com/index/dealer/search.html` request shape (`keywords`, `distance`, `lat`, `lng`, `cate`) and the response schema (`data.center`, `data.list[*]`).
-- Next critical task: translate the captured payload into a dealer data model and normalization/deduplication plan before implementing the proof-of-concept fetcher.
+- Next critical task: enrich ZIP centroids, then build the proof-of-concept fetcher that leverages the offline coordinates and feeds normalized records into the upcoming orchestrator.
 
 ## Outstanding TODO Highlights
-- Define dealer data model, normalization/deduplication strategy, and implement a proof-of-concept fetcher informed by the recon payloads.
-- Evaluate geocoding approach (reuse Holosun map lat/lng vs. offline ZIP coordinate table) to minimize external dependencies during full-scale runs.
+- Enrich the CA ZIP dataset with offline latitude/longitude values and plumb them into request construction.
+- Build the proof-of-concept fetcher that consumes the offline coordinates, captures raw payloads, and writes normalized dealer records.
 - Implement progress-aware run orchestrator, resilience features (retry/backoff/manual prompts), CSV writer, tests, and delivery checklist.
 
 ## Open Risks & Questions

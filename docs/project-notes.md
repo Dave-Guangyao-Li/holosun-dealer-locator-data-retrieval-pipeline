@@ -49,6 +49,27 @@ Last updated: 2025-10-08
 - Raw artifacts: JSON bodies live at `data/raw/network/20251008_94105/response_002.json` (empty hit) and `data/raw/network/20251008_90001/response_002.json` (single dealer example). Associated summaries and Playwright traces sit alongside each capture directory for audit.
 - Non-dealer Google Maps telemetry (`mapsjs` RPC responses) is captured but not required for the pipeline; we can ignore during parsing once the dealer payload is isolated.
 
+## Dealer Data Model & Normalization Plan (2025-10-08)
+- **Canonical fields**: `dealer_id`, `holosun_id`, `company_name`, `street`, `suite`, `city`, `state`, `postal_code`, `phone`, `emails`, `website`, `source_zip`, `holosun_category`, `is_civil`, `is_military`, `holosun_lat`, `holosun_lng`, `first_seen_at`, `last_seen_at`, plus `raw_record_path` for provenance.
+- **Source mapping**: `holosun_id` from `data.list[*].id`; `company_name` from `company_name`; address pieces parsed from `contact_addr` (primary) with fallback to `contact`; `phone` from `phone`/`tel`; `emails` from `email`/`invoices_email`; `website` from `website`/`sale_website`; geographic flags from boolean columns.
+- **Normalization rules**:
+  - Strip the `"Phone:"` prefix, collapse whitespace, and canonicalize formatting with `phonenumbers` when available.
+  - Split email strings on commas, trim whitespace, deduplicate, and persist as a sorted `;`-delimited string to keep CSV compatibility while retaining multiple addresses.
+  - Parse `contact_addr` via `usaddress.tag`, capturing street line and suite separately; enforce uppercase state `CA`, normalize city to title case, and validate ZIP against the five-digit pattern.
+  - Preserve Holosun-provided lat/lng as floats and surface them in dedicated `holosun_lat`/`holosun_lng` columns without rounding to maintain fidelity for future spatial work.
+  - Carry forward optional commerce links only when non-empty and document an extension column set for future enrichment (`store_amazon`, etc.) outside the primary CSV.
+- **Deduplication approach**:
+  - Compute `dealer_id` as a SHA256 hex digest of `company_name` (normalized) + `street` + `city` + `postal_code` to stay stable across minor payload shuffles.
+  - Track `first_seen_at`/`last_seen_at` timestamps per dealer using capture metadata so repeated ZIP hits contribute to audit trails without multiplying rows.
+  - Treat Holosun `id` as advisory only—retain it for troubleshooting but do not rely on it for uniqueness because IDs may recycle across categories or regions.
+- **Audit strategy**: persist each raw JSON payload path in the structured record, and archive the normalized record to an intermediate SQLite table before rendering CSV to support repeatable quality checks.
+
+## Geocoding Strategy Decision (2025-10-08)
+- The Holosun frontend geocodes ZIPs through Google Maps at runtime, but relying on that flow would keep our automation tethered to an external API and introduce nondeterministic lat/lng drift.
+- Our existing `data/processed/ca_zip_codes.csv` lacks coordinates, so we will enrich it with ZIP centroid latitude/longitude from an offline open dataset (e.g., OpenDataDE ZCTA centroids) during ingestion.
+- Playwright recon remains useful for capturing request payloads, yet the proof-of-concept fetcher will submit requests directly with the offline coordinates to avoid browser automation and third-party lookups during full runs.
+- Holosun response coordinates stay authoritative for dealer point locations; the ZIP centroid is purely a request input and can be logged separately for transparency.
+
 ## Operator Feedback and Progress Reporting
 - Provide a high-level run controller that surfaces stage-based updates (e.g., collecting ZIPs, submitting locator requests, normalizing data, exporting CSV) to stdout and structured logs.
 - Emit progress metrics such as processed ZIP count, dealer records accumulated, and retry/backoff events to keep the operator informed in long runs.
@@ -70,7 +91,7 @@ Last updated: 2025-10-08
 ## TODO Backlog
 - [x] Capture live network behavior of the dealer locator via `scripts/capture_locator_traffic.py`, storing request/response payloads and annotated summaries. (2025-10-08 headless runs for ZIP 94105/90001 captured under `data/raw/network/20251008_*`.)
 - [x] Implemented `scripts/fetch_ca_zip_codes.py` to download and validate California ZIP data, exporting to `data/processed/ca_zip_codes.csv` with source metadata.
-- [ ] Define dealer data model, normalization rules, and deduplication key strategy.
+- [x] Documented dealer data model, normalization rules, and deduplication key strategy (2025-10-08).
 - [ ] Build proof-of-concept fetcher for a single ZIP including anti-automation detection hooks.
 - [ ] Implement stage-aware run orchestrator that reports progress, surfaces manual-intervention prompts, and stores run summaries.
 - [ ] Implement stateful deduplication and accumulator for merging records across ZIPs.
@@ -78,6 +99,7 @@ Last updated: 2025-10-08
 - [ ] Create CSV writer and validation scripts (spot-checks, summary metrics).
 - [ ] Draft README with setup, run instructions, and ethical scraping guidelines.
 - [ ] Prepare release checklist (data validation, documentation updates, final CSV verification).
+- [ ] Enrich `data/processed/ca_zip_codes.csv` with offline ZIP centroid latitude/longitude for request payloads.
 
 ## Risks and Open Questions
 - Anti-automation defenses may require human-in-the-loop operations; need clarity on acceptable manual steps for the assignment.
