@@ -75,6 +75,12 @@ Last updated: 2025-10-08
 - Regenerated `data/processed/ca_zip_codes.csv` with populated `latitude`/`longitude` columns for all 1,678 California ZIPs; metadata now records both centroid sources and the override policy.
 - Script logs flag non-standard placeholder ZIPs and surfaces counts for missing centroid matches so future source drift is immediately visible to operators.
 
+## Single ZIP Fetcher Prototype (2025-10-08)
+- Added `scripts/fetch_single_zip.py`, a proof-of-concept fetcher that reads centroid coordinates from `data/processed/ca_zip_codes.csv`, submits Holosun dealer lookups via direct POST requests, and raises explicit `AntiAutomationError` exceptions when responses resemble blocks (non-JSON content, non-`code=1` payloads, 4xx/5xx statuses, or common CAPTCHA phrases).
+- The script persists artifacts under `data/raw/single_zip_runs/<timestamp>_<zip>/`, capturing the request payload/headers, full JSON response, and a normalized dealer summary (company name, contact lines, cleaned phone, web URL, lat/lon, Holosun ID, source ZIP).
+- Normalization currently focuses on trimming phone prefixes, collapsing multiline addresses, and preserving emails for future enrichment; broader deduplication and persistence remain orchestrator responsibilities.
+- CLI supports `--skip-write` for smoke tests, configurable distance/category/user agent parameters, and defaults to the enriched centroid dataset so no live geocoder is required during requests.
+
 ## Operator Feedback and Progress Reporting
 - Provide a high-level run controller that surfaces stage-based updates (e.g., collecting ZIPs, submitting locator requests, normalizing data, exporting CSV) to stdout and structured logs.
 - Emit progress metrics such as processed ZIP count, dealer records accumulated, and retry/backoff events to keep the operator informed in long runs.
@@ -97,7 +103,7 @@ Last updated: 2025-10-08
 - [x] Capture live network behavior of the dealer locator via `scripts/capture_locator_traffic.py`, storing request/response payloads and annotated summaries. (2025-10-08 headless runs for ZIP 94105/90001 captured under `data/raw/network/20251008_*`.)
 - [x] Implemented `scripts/fetch_ca_zip_codes.py` to download and validate California ZIP data, exporting to `data/processed/ca_zip_codes.csv` with source metadata.
 - [x] Documented dealer data model, normalization rules, and deduplication key strategy (2025-10-08).
-- [ ] Build proof-of-concept fetcher for a single ZIP including anti-automation detection hooks.
+- [x] Build proof-of-concept fetcher for a single ZIP including anti-automation detection hooks. (2025-10-08 via `scripts/fetch_single_zip.py` writing to `data/raw/single_zip_runs/`.)
 - [ ] Implement stage-aware run orchestrator that reports progress, surfaces manual-intervention prompts, and stores run summaries.
 - [ ] Implement stateful deduplication and accumulator for merging records across ZIPs.
 - [ ] Add resilient retry/backoff, logging, and manual-intervention prompts when encountering blocks.
@@ -116,4 +122,5 @@ Last updated: 2025-10-08
 ## Change Log
 - **2025-10-08**: Executed Playwright recon for ZIPs 94105 and 90001, refreshed `scripts/capture_locator_traffic.py` selectors/response waiting, archived raw payloads under `data/raw/network/20251008_*`, and documented the dealer API envelope plus normalization considerations.
 - **2025-10-08**: Enriched CA ZIP reference data with centroid coordinates via OpenDataDE GeoJSON + USCities fallback, added manual overrides for outliers, and regenerated processed CSV/metadata.
+- **2025-10-08**: Shipped `scripts/fetch_single_zip.py`, delivering offline-centroid driven single-ZIP lookups, anti-automation detection, and normalized artifact dumps under `data/raw/single_zip_runs/`.
 - **Prior session**: Added anti-automation mitigation plan, clarified backend classification, consolidated architecture summary with automation-first recon/ZIP sourcing guidance and dedicated network capture script plan, documented operator progress reporting expectations, tightened ZIP sourcing implementation details, shipped automated CA ZIP ingestion artifacts, curated TODO backlog, scaffolded repository structure.
