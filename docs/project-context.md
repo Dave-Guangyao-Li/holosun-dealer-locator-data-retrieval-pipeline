@@ -28,11 +28,11 @@
 - Latest POC: single-ZIP fetcher validates the offline centroid workflow, surfaces anti-automation issues explicitly, and stores normalized summaries for quick inspection.
 - Stage-aware orchestrator now exposes configurable retries/backoff and interactive prompts, producing per-run summaries plus deduplicated dealer catalogs ready for export.
 - Export pipeline (`scripts/export_normalized_dealers.py`) operational for turning `normalized_dealers.json` into CSV and metrics artifacts; validation helpers and pytest coverage confirm schema expectations.
+- Orchestrator persistence now auto-refreshes deliverables/metrics on each flush, saves `run_state.json`, and supports resumable runs via `--resume-state`/`--resume-policy` with optional blocked ZIP replay from `logs/manual_attention.log`.
+- Operator documentation refreshed: README now covers setup/run guidance and `docs/release-checklist.md` captures the pre-flight validation steps before publishing datasets.
 
 ## Outstanding TODO Highlights
-- Automate CSV export + metrics emission immediately after successful orchestrator runs, including batch flushing so long runs can stream updates and resume mid-way.
-- Build a resume flow that replays blocked ZIPs recorded in `logs/manual_attention.log` or previous run summaries.
-- Expand release documentation (README, operator handbook) and finalize validation checklist before full-batch execution.
+- Backlog cleared for this milestone; future work will be tracked via new tickets as requirements evolve.
 
 ## Open Risks & Questions
 - Anti-automation measures may require manual intervention; need clarity on acceptable levels of human involvement for the assignment.

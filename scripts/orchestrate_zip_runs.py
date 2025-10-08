@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import requests
 
@@ -166,6 +166,61 @@ class DealerAggregate:
             self.runs.append(run_reference)
         self.last_seen_at = observed_at
 
+    @classmethod
+    def from_snapshot(cls, snapshot: Dict[str, Any]) -> "DealerAggregate":
+        dealer_id = snapshot.get("dealer_id")
+        if not dealer_id:
+            raise ValueError("Snapshot missing dealer_id")
+
+        def _list(value: Any) -> List[Any]:
+            if not value:
+                return []
+            if isinstance(value, list):
+                return list(value)
+            return [value]
+
+        def _string_list(value: Any) -> List[str]:
+            result: List[str] = []
+            for entry in _list(value):
+                if entry is None:
+                    continue
+                text = str(entry).strip()
+                if text and text not in result:
+                    result.append(text)
+            return result
+
+        def _unique_list(value: Any) -> List[Any]:
+            result: List[Any] = []
+            for entry in _list(value):
+                if entry not in result:
+                    result.append(entry)
+            return result
+
+        return cls(
+            dealer_id=dealer_id,
+            dealer_name=snapshot.get("dealer_name"),
+            street=snapshot.get("street"),
+            city=snapshot.get("city"),
+            state=snapshot.get("state"),
+            postal_code=snapshot.get("postal_code"),
+            phone=snapshot.get("phone"),
+            website=snapshot.get("website"),
+            latitude=snapshot.get("latitude"),
+            longitude=snapshot.get("longitude"),
+            address_text=snapshot.get("address_text"),
+            address_lines=_string_list(snapshot.get("address_lines")),
+            emails=_string_list(snapshot.get("emails")),
+            source_zips=_string_list(snapshot.get("source_zips")),
+            holosun_ids=_unique_list(snapshot.get("holosun_ids")),
+            runs=_string_list(snapshot.get("runs")),
+            first_seen_at=snapshot.get("first_seen_at")
+            or snapshot.get("last_seen_at")
+            or datetime.utcnow().isoformat() + "Z",
+            last_seen_at=snapshot.get("last_seen_at")
+            or snapshot.get("first_seen_at")
+            or datetime.utcnow().isoformat() + "Z",
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "dealer_id": self.dealer_id,
@@ -234,6 +289,37 @@ class DealerAccumulator:
 
     def __len__(self) -> int:
         return len(self._records)
+
+    def load_snapshot(self, records: Iterable[Dict[str, Any]]) -> None:
+        for record in records:
+            try:
+                aggregate = DealerAggregate.from_snapshot(record)
+            except ValueError:
+                continue
+            self._records[aggregate.dealer_id] = aggregate
+
+
+@dataclass
+class ResumeState:
+    run_id: Optional[str]
+    run_dir: Path
+    run_state_path: Path
+    processed_zips: Set[str]
+    blocked_zips: Set[str]
+    dealers_snapshot: List[Dict[str, Any]]
+    normalized_json_path: Optional[Path]
+    manual_log_path: Optional[Path]
+
+    def to_metadata(self) -> Dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "run_dir": str(self.run_dir),
+            "run_state": str(self.run_state_path),
+            "normalized_json": str(self.normalized_json_path) if self.normalized_json_path else None,
+            "manual_log": str(self.manual_log_path) if self.manual_log_path else None,
+            "processed_zips": sorted(self.processed_zips),
+            "blocked_zips": sorted(self.blocked_zips),
+        }
 
 
 def build_deliverable_rows(
@@ -390,6 +476,37 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_LIST_DELIMITER,
         help="Delimiter used when flattening list fields into CSV output (default '|').",
     )
+    parser.add_argument(
+        "--resume-state",
+        type=Path,
+        help="Path to a previous run directory or run_state.json used to seed resume data.",
+    )
+    parser.add_argument(
+        "--resume-policy",
+        choices=["skip", "blocked", "all"],
+        default="skip",
+        help=(
+            "How to handle ZIP selection when resuming."
+            " 'skip' removes ZIPs already completed in the resume state."
+            " 'blocked' limits the run to blocked ZIPs."
+            " 'all' leaves the requested ZIP list unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--include-manual-log",
+        action="store_true",
+        help="Include ZIP codes recorded in the manual attention log when resuming.",
+    )
+    parser.add_argument(
+        "--manual-log",
+        type=Path,
+        default=DEFAULT_MANUAL_LOG,
+        help="Path to manual attention log (used with --include-manual-log).",
+    )
+    parser.add_argument(
+        "--manual-log-run",
+        help="Limit manual attention log replay to entries whose artifact path contains this run ID.",
+    )
     return parser
 
 
@@ -450,7 +567,16 @@ def expand_zip_list(zip_args: Optional[Sequence[str]], *, centroids: Dict[str, D
     return sorted(dict.fromkeys(selected))
 
 
-def append_manual_attention(run_dir: Path, zip_code: str, issues: str, payload: Dict[str, Any], *, response: Optional[requests.Response], body_text: Optional[str]) -> Path:
+def append_manual_attention(
+    run_dir: Path,
+    zip_code: str,
+    issues: str,
+    payload: Dict[str, Any],
+    *,
+    response: Optional[requests.Response],
+    body_text: Optional[str],
+    manual_log_path: Path = DEFAULT_MANUAL_LOG,
+) -> Path:
     blocked_dir = run_dir / "blocked_zips"
     blocked_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
@@ -466,8 +592,9 @@ def append_manual_attention(run_dir: Path, zip_code: str, issues: str, payload: 
     }
     artifact_path.write_text(json.dumps(artifact, indent=2))
 
-    DEFAULT_MANUAL_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with DEFAULT_MANUAL_LOG.open("a", encoding="utf-8") as handle:
+    manual_log_path = manual_log_path.expanduser()
+    manual_log_path.parent.mkdir(parents=True, exist_ok=True)
+    with manual_log_path.open("a", encoding="utf-8") as handle:
         handle.write(
             json.dumps(
                 {
@@ -482,8 +609,104 @@ def append_manual_attention(run_dir: Path, zip_code: str, issues: str, payload: 
     return artifact_path
 
 
+def resolve_artifact_path(base_dir: Path, value: Optional[str]) -> Optional[Path]:
+    if not value:
+        return None
+    path = Path(str(value)).expanduser()
+    if not path.is_absolute():
+        path = (base_dir / path).resolve()
+    return path
+
+
+def load_resume_state(resume_path: Path) -> ResumeState:
+    resolved = resume_path.expanduser().resolve()
+    run_state_path = resolved / RUN_STATE_FILENAME if resolved.is_dir() else resolved
+    if not run_state_path.exists():
+        raise FileNotFoundError(f"Resume state not found at {run_state_path}")
+
+    data = json.loads(run_state_path.read_text())
+    run_dir = run_state_path.parent
+
+    processed_zips = {
+        str(entry.get("zip_code")).zfill(5)
+        for entry in data.get("zip_summaries", [])
+        if entry and entry.get("zip_code")
+    }
+    blocked_zips = {
+        str(entry.get("zip_code")).zfill(5)
+        for entry in data.get("blocked_events", [])
+        if entry and entry.get("zip_code")
+    }
+
+    artifacts = data.get("artifacts") or {}
+    normalized_json_path = resolve_artifact_path(run_dir, artifacts.get("normalized_json"))
+
+    dealers_snapshot: List[Dict[str, Any]] = []
+    if normalized_json_path and normalized_json_path.exists():
+        try:
+            dealers_snapshot = json.loads(normalized_json_path.read_text())
+        except Exception as exc:  # pragma: no cover - defensive logging
+            LOGGER.warning("Failed to load dealers snapshot from %s: %s", normalized_json_path, exc)
+
+    manual_log_entry = artifacts.get("manual_log") or data.get("manual_log")
+    manual_log_path = resolve_artifact_path(run_dir, manual_log_entry) if manual_log_entry else DEFAULT_MANUAL_LOG
+
+    return ResumeState(
+        run_id=data.get("run_id"),
+        run_dir=run_dir,
+        run_state_path=run_state_path,
+        processed_zips=set(processed_zips),
+        blocked_zips=set(blocked_zips),
+        dealers_snapshot=dealers_snapshot,
+        normalized_json_path=normalized_json_path,
+        manual_log_path=manual_log_path,
+    )
+
+
+def load_manual_attention_zips(log_path: Path, *, run_id_filter: Optional[str] = None) -> List[str]:
+    if not log_path.exists():
+        return []
+
+    zips: List[str] = []
+    with log_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            artifact_ref = str(payload.get("run_block") or "")
+            if run_id_filter and run_id_filter not in artifact_ref:
+                continue
+            zip_value = str(payload.get("zip_code") or "").strip()
+            if not zip_value:
+                continue
+            zips.append(zip_value.zfill(5))
+    return sorted(dict.fromkeys(zips))
+
+
 def run_orchestrator(args: argparse.Namespace) -> int:
     configure_logging(args.verbose)
+
+    resume_state: Optional[ResumeState] = None
+    if args.resume_state:
+        try:
+            resume_state = load_resume_state(args.resume_state)
+        except FileNotFoundError as exc:
+            LOGGER.error("%s", exc)
+            return 3
+        except Exception as exc:
+            LOGGER.error("Failed to load resume state: %s", exc)
+            return 3
+        else:
+            LOGGER.info(
+                "Loaded resume state from %s (processed=%d, blocked=%d)",
+                resume_state.run_state_path,
+                len(resume_state.processed_zips),
+                len(resume_state.blocked_zips),
+            )
 
     run_started = datetime.utcnow()
     run_id = run_started.strftime("%Y%m%dT%H%M%SZ")
@@ -520,11 +743,64 @@ def run_orchestrator(args: argparse.Namespace) -> int:
     target_zips = expand_zip_list(args.zip_codes, centroids=centroids)
     if args.max_zips is not None:
         target_zips = target_zips[: args.max_zips]
-    if not target_zips:
+
+    manual_log_path = args.manual_log
+    if resume_state and manual_log_path == DEFAULT_MANUAL_LOG and resume_state.manual_log_path:
+        manual_log_path = resume_state.manual_log_path
+
+    manual_run_filter = args.manual_log_run or (resume_state.run_id if resume_state and not args.manual_log_run else None)
+    manual_log_zips: Set[str] = set()
+    manual_log_used: Set[str] = set()
+    if args.include_manual_log:
+        raw_manual_zips = set(load_manual_attention_zips(manual_log_path, run_id_filter=manual_run_filter))
+        unknown_manual = sorted(zip_code for zip_code in raw_manual_zips if zip_code not in centroids)
+        if unknown_manual:
+            LOGGER.warning(
+                "Manual attention log contained %d ZIPs not present in centroid table; skipping", len(unknown_manual)
+            )
+        manual_log_zips = {zip_code for zip_code in raw_manual_zips if zip_code in centroids}
+        manual_log_used = set(manual_log_zips)
+        LOGGER.info(
+            "Loaded %d ZIPs from manual attention log %s",
+            len(manual_log_zips),
+            manual_log_path,
+        )
+
+    resume_processed = resume_state.processed_zips if resume_state else set()
+    resume_blocked = resume_state.blocked_zips if resume_state else set()
+
+    if resume_state and args.resume_policy == "skip" and resume_processed:
+        before = len(target_zips)
+        target_zips = [zip_code for zip_code in target_zips if zip_code not in resume_processed]
+        skipped = before - len(target_zips)
+        if skipped:
+            LOGGER.info("Skipping %d ZIPs already completed in resume state", skipped)
+
+    if args.resume_policy == "blocked":
+        blocked_targets: Set[str] = set(resume_blocked)
+        if args.include_manual_log:
+            blocked_targets |= manual_log_zips
+        if not blocked_targets:
+            LOGGER.error("Resume policy 'blocked' selected but no blocked ZIPs were found")
+            return 3
+        target_zips = sorted(blocked_targets)
+        manual_log_zips = set()
+    else:
+        if args.include_manual_log and manual_log_zips:
+            merged = list(target_zips) + list(manual_log_zips)
+            target_zips = sorted(dict.fromkeys(merged))
+
+    if not target_zips and not resume_state:
         LOGGER.error("No ZIP codes selected for processing")
         return 2
 
     accumulator = DealerAccumulator()
+    if resume_state and resume_state.dealers_snapshot:
+        accumulator.load_snapshot(resume_state.dealers_snapshot)
+        LOGGER.info("Seeded accumulator with %d dealers from resume snapshot", len(accumulator))
+
+    initial_unique_dealers = len(accumulator)
+
     zip_summaries: List[Dict[str, Any]] = []
     blocked_events: List[Dict[str, Any]] = []
     error_events: List[Dict[str, Any]] = []
@@ -539,7 +815,11 @@ def run_orchestrator(args: argparse.Namespace) -> int:
     retry_backoff = args.retry_backoff if args.retry_backoff > 0 else 1.0
 
     total_zips = len(target_zips)
+    resume_refresh_only = bool(resume_state and total_zips == 0)
     abort_requested = False
+
+    if resume_refresh_only:
+        LOGGER.info("No ZIPs remain after applying resume policy; will refresh artifacts and exit once persistence completes")
 
     run_state: Dict[str, Any] = {
         "run_id": run_id,
@@ -568,7 +848,18 @@ def run_orchestrator(args: argparse.Namespace) -> int:
             "normalized_csv": str(normalized_csv_path),
             "deliverable_csv": str(deliverable_path),
             "metrics_json": str(metrics_path),
+            "manual_log": str(manual_log_path) if (args.include_manual_log or resume_state) else None,
         },
+        "resume_policy": args.resume_policy,
+        "resume_source": resume_state.to_metadata() if resume_state else None,
+        "manual_log_enabled": bool(args.include_manual_log),
+        "manual_log_path": str(manual_log_path) if (args.include_manual_log or resume_state) else None,
+        "manual_log_run_filter": manual_run_filter,
+        "manual_log_zips": sorted(manual_log_used) if manual_log_used else [],
+        "preexisting_zip_total": len(resume_processed),
+        "preexisting_blocked_total": len(resume_blocked),
+        "initial_unique_dealers": initial_unique_dealers,
+        "resume_refresh_only": resume_refresh_only,
     }
 
     def persist_progress(*, final: bool, completed_at: Optional[str] = None) -> None:
@@ -718,6 +1009,7 @@ def run_orchestrator(args: argparse.Namespace) -> int:
                     payload,
                     response=response,
                     body_text=body_text,
+                    manual_log_path=manual_log_path,
                 )
                 resolution = (
                     "abort"

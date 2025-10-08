@@ -1,5 +1,5 @@
 # Holosun Dealer Locator Data Collection - Project Notes
-Last updated: 2025-10-08
+Last updated: 2025-10-09
 
 ## Executive Summary
 - Project focus: backend-oriented data acquisition and processing pipeline delivering a curated CSV dataset. No frontend UI is planned beyond command-line tooling and documentation.
@@ -33,6 +33,7 @@ Last updated: 2025-10-08
    - Store raw per-ZIP payloads (newline JSON) for audit alongside a richer `normalized_dealers.json` snapshot that keeps IDs, timestamps, and geocodes for troubleshooting.
    - Aggregate normalized dealers in memory or SQLite before CSV export, flushing batches to disk periodically so long runs can resume without replaying completed ZIPs.
    - Auto-render the deliverable CSV (`holosun_ca_dealers.csv`) after each flush, trimmed to assignment-required columns (`dealer_name`, `street`, `city`, `state`, `postal_code`, `phone`, `website`, `source_zip`) while keeping metrics JSON and audit CSVs in the run directory.
+   - Persist `run_state.json`, normalized snapshots, and metrics on every flush, enabling resumption with `--resume-state` and `--resume-policy` (skip completed ZIPs or target blocked ones) with optional log replay via `--include-manual-log`.
 6. **Quality and Observability**
    - Structured logging, retry with exponential backoff, summary report after run.
    - .env driven configuration for endpoints, rate limits, and logging levels.
@@ -121,10 +122,10 @@ Last updated: 2025-10-08
 - [x] Implement stateful deduplication and accumulator for merging records across ZIPs. (2025-10-08 orchestrator ingest pipeline emits `normalized_dealers.json`.)
 - [x] Add resilient retry/backoff, logging, and manual-intervention prompts when encountering blocks. (2025-10-08: orchestrator `--max-retries`/`--retry-delay`/`--prompt-on-block` flow.)
 - [x] Create CSV writer and validation scripts (spot-checks, summary metrics). (2025-10-08: `scripts/export_normalized_dealers.py` + `holosun_locator.exports`.)
-- [ ] Automate CSV export and metrics emission at the end of orchestrator runs.
-- [ ] Design resume tooling to replay blocked ZIPs from `logs/manual_attention.log` or run summaries.
-- [ ] Draft README with setup, run instructions, and ethical scraping guidelines.
-- [ ] Prepare release checklist (data validation, documentation updates, final CSV verification).
+- [x] Automate CSV export and metrics emission at the end of orchestrator runs.
+- [x] Design resume tooling to replay blocked ZIPs from `logs/manual_attention.log` or run summaries.
+- [x] Draft README with setup, run instructions, and ethical scraping guidelines.
+- [x] Prepare release checklist (data validation, documentation updates, final CSV verification).
 - [x] Enriched `data/processed/ca_zip_codes.csv` with offline ZIP centroid latitude/longitude for request payloads (2025-10-08).
 
 ## Risks and Open Questions
@@ -135,6 +136,7 @@ Last updated: 2025-10-08
 - Confirm whether downstream consumers expect geocoding or map visualization (currently out of scope).
 
 ## Change Log
+- **2025-10-08**: Enabled orchestrator resume/replay tooling (`--resume-state`, `--resume-policy`, `--include-manual-log`), wired automatic deliverable + metrics refresh on each flush/finalization, added pytest coverage for resume helpers, and drafted operator-facing README + release checklist.
 - **2025-10-08**: Documented the final handoff CSV schema, outlined incremental batch flushing + resume strategy, and planned automatic exporter/metrics hooks inside the orchestrator.
 - **2025-10-08**: Hardened the run orchestrator with configurable retry/backoff plus interactive prompts, added CSV export/validation tooling with metrics JSON output, and introduced pytest coverage for the exporter utilities.
 - **2025-10-08**: Executed Playwright recon for ZIPs 94105 and 90001, refreshed `scripts/capture_locator_traffic.py` selectors/response waiting, archived raw payloads under `data/raw/network/20251008_*`, and documented the dealer API envelope plus normalization considerations.
