@@ -26,6 +26,10 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+SRC_DIR = ROOT_DIR / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 from scripts.fetch_single_zip import (
     AntiAutomationError,
     detect_anti_automation,
@@ -36,10 +40,32 @@ from scripts.fetch_single_zip import (
     write_artifacts,
 )
 
+from holosun_locator.exports import (
+    compute_metrics,
+    export_dealers_to_csv,
+    validate_dealers,
+)
+
 LOGGER = logging.getLogger("holosun.orchestrator")
 CITY_STATE_ZIP_RE = re.compile(r"^(?P<city>.*?)(?:,\s*(?P<state>[A-Z]{2}))?\s+(?P<postal>\d{5})(?:-\d{4})?$")
 DEFAULT_OUTPUT_DIR = Path("data/raw/orchestrator_runs")
 DEFAULT_MANUAL_LOG = Path("logs/manual_attention.log")
+DEFAULT_FLUSH_EVERY = 25
+DEFAULT_DELIVERABLE_NAME = "holosun_ca_dealers.csv"
+DEFAULT_LIST_DELIMITER = "|"
+RUN_STATE_FILENAME = "run_state.json"
+NORMALIZED_JSON_NAME = "normalized_dealers.json"
+NORMALIZED_CSV_NAME = "normalized_dealers.csv"
+DELIVERABLE_FIELDNAMES: Sequence[str] = (
+    "dealer_name",
+    "street",
+    "city",
+    "state",
+    "postal_code",
+    "phone",
+    "website",
+    "source_zip",
+)
 
 
 class Stage:
@@ -210,6 +236,38 @@ class DealerAccumulator:
         return len(self._records)
 
 
+def build_deliverable_rows(
+    dealers: Sequence[Dict[str, Any]],
+    *,
+    list_delimiter: str,
+) -> List[Dict[str, Any]]:
+    """Transform normalized dealers into the trimmed deliverable schema."""
+
+    rows: List[Dict[str, Any]] = []
+    for dealer in dealers:
+        source_zips = dealer.get("source_zips") or []
+        if isinstance(source_zips, (list, tuple)):
+            source_zip_value = list_delimiter.join(str(zip_code) for zip_code in source_zips if zip_code)
+        elif source_zips is None:
+            source_zip_value = ""
+        else:
+            source_zip_value = str(source_zips)
+
+        rows.append(
+            {
+                "dealer_name": dealer.get("dealer_name") or "",
+                "street": dealer.get("street") or "",
+                "city": dealer.get("city") or "",
+                "state": dealer.get("state") or "",
+                "postal_code": dealer.get("postal_code") or "",
+                "phone": dealer.get("phone") or "",
+                "website": dealer.get("website") or "",
+                "source_zip": source_zip_value,
+            }
+        )
+    return rows
+
+
 def compute_dealer_id(dealer: Dict[str, Any]) -> str:
     street, city, _, postal = extract_address_components(dealer)
     parts = [
@@ -305,6 +363,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompt-on-block",
         action="store_true",
         help="Prompt interactively when a ZIP is blocked to choose retry/skip/abort.",
+    )
+    parser.add_argument(
+        "--flush-every",
+        type=int,
+        default=DEFAULT_FLUSH_EVERY,
+        help=(
+            "Flush normalized artifacts, refresh deliverable CSV, and persist metrics after this many "
+            "processed ZIP codes (set to 0 to flush only at the end)."
+        ),
+    )
+    parser.add_argument(
+        "--deliverable-name",
+        default=DEFAULT_DELIVERABLE_NAME,
+        help="Filename (relative to run directory unless absolute) for the final deliverable CSV.",
+    )
+    parser.add_argument(
+        "--metrics-name",
+        help=(
+            "Filename (relative to run directory unless absolute) for the metrics JSON. "
+            "Defaults to <deliverable-name>.metrics.json."
+        ),
+    )
+    parser.add_argument(
+        "--list-delimiter",
+        default=DEFAULT_LIST_DELIMITER,
+        help="Delimiter used when flattening list fields into CSV output (default '|').",
     )
     return parser
 
@@ -409,6 +493,23 @@ def run_orchestrator(args: argparse.Namespace) -> int:
     if not args.skip_raw:
         zip_output_dir.mkdir(parents=True, exist_ok=True)
 
+    list_delimiter = args.list_delimiter or DEFAULT_LIST_DELIMITER
+    flush_every = max(args.flush_every, 0) if args.flush_every is not None else 0
+
+    deliverable_name = args.deliverable_name or DEFAULT_DELIVERABLE_NAME
+    deliverable_path = Path(deliverable_name)
+    if not deliverable_path.is_absolute():
+        deliverable_path = run_dir / deliverable_path
+
+    metrics_name = args.metrics_name or f"{Path(deliverable_name).stem}.metrics.json"
+    metrics_path = Path(metrics_name)
+    if not metrics_path.is_absolute():
+        metrics_path = run_dir / metrics_path
+
+    normalized_json_path = run_dir / NORMALIZED_JSON_NAME
+    normalized_csv_path = run_dir / NORMALIZED_CSV_NAME
+    run_state_path = run_dir / RUN_STATE_FILENAME
+
     log_stage(Stage.LOAD_ZIPS, f"Loading ZIP centroids from {args.zip_csv}")
     try:
         centroids = load_zip_centroids(args.zip_csv)
@@ -439,6 +540,119 @@ def run_orchestrator(args: argparse.Namespace) -> int:
 
     total_zips = len(target_zips)
     abort_requested = False
+
+    run_state: Dict[str, Any] = {
+        "run_id": run_id,
+        "started_at": run_started.isoformat() + "Z",
+        "completed_at": None,
+        "zip_total": total_zips,
+        "zip_processed": 0,
+        "blocked_count": 0,
+        "error_count": 0,
+        "unique_dealers": 0,
+        "zip_summaries": zip_summaries,
+        "blocked_events": blocked_events,
+        "error_events": error_events,
+        "aborted": False,
+        "retry_policy": {
+            "max_retries": max_attempts - 1,
+            "initial_delay_seconds": base_delay,
+            "backoff_multiplier": retry_backoff,
+            "prompt_on_block_requested": bool(args.prompt_on_block),
+            "prompt_on_block_enabled": bool(prompt_enabled),
+        },
+        "last_flush_at": None,
+        "artifacts": {
+            "run_state": str(run_state_path),
+            "normalized_json": str(normalized_json_path),
+            "normalized_csv": str(normalized_csv_path),
+            "deliverable_csv": str(deliverable_path),
+            "metrics_json": str(metrics_path),
+        },
+    }
+
+    def persist_progress(*, final: bool, completed_at: Optional[str] = None) -> None:
+        """Write the latest dealer, deliverable, and metrics artifacts."""
+
+        dealers_snapshot = accumulator.to_list()
+        flush_timestamp = completed_at or datetime.utcnow().isoformat() + "Z"
+
+        try:
+            normalized_json_path.write_text(json.dumps(dealers_snapshot, indent=2))
+        except Exception as exc:
+            LOGGER.error("Failed to write normalized dealer JSON: %s", exc)
+
+        try:
+            export_dealers_to_csv(dealers_snapshot, normalized_csv_path, list_delimiter=list_delimiter)
+        except Exception as exc:
+            LOGGER.error("Failed to write normalized dealer CSV: %s", exc)
+
+        validation_issues = validate_dealers(dealers_snapshot)
+        for issue in validation_issues:
+            LOGGER.warning("Validation issue: %s", issue)
+
+        deliverable_rows = build_deliverable_rows(dealers_snapshot, list_delimiter=list_delimiter)
+        try:
+            export_dealers_to_csv(
+                deliverable_rows,
+                deliverable_path,
+                fieldnames=DELIVERABLE_FIELDNAMES,
+                list_delimiter=list_delimiter,
+            )
+            LOGGER.info(
+                "Refreshed deliverable CSV at %s (%d dealers)",
+                deliverable_path,
+                len(deliverable_rows),
+            )
+        except Exception as exc:
+            LOGGER.error("Failed to write deliverable CSV: %s", exc)
+
+        try:
+            metrics = compute_metrics(dealers_snapshot)
+        except Exception as exc:
+            LOGGER.error("Failed to compute metrics: %s", exc)
+            metrics = {}
+        else:
+            LOGGER.info(
+                "Metrics snapshot: total=%d, unique=%d, with_phone=%d",
+                metrics.get("total_dealers", 0),
+                metrics.get("unique_dealer_ids", 0),
+                metrics.get("dealers_with_phone", 0),
+            )
+
+        try:
+            metrics_path.parent.mkdir(parents=True, exist_ok=True)
+            metrics_path.write_text(json.dumps(metrics, indent=2))
+        except Exception as exc:
+            LOGGER.error("Failed to write metrics JSON: %s", exc)
+
+        run_state.update(
+            {
+                "zip_processed": len(zip_summaries),
+                "blocked_count": len(blocked_events),
+                "error_count": len(error_events),
+                "unique_dealers": len(accumulator),
+                "aborted": abort_requested,
+                "last_flush_at": flush_timestamp,
+            }
+        )
+        run_state["completed_at"] = completed_at if final else None
+
+        persistable_state = dict(run_state)
+        persistable_state["zip_summaries"] = zip_summaries
+        persistable_state["blocked_events"] = blocked_events
+        persistable_state["error_events"] = error_events
+
+        try:
+            run_state_path.write_text(json.dumps(persistable_state, indent=2))
+        except Exception as exc:
+            LOGGER.error("Failed to write run state: %s", exc)
+
+        if final and completed_at:
+            try:
+                (run_dir / "run_summary.json").write_text(json.dumps(persistable_state, indent=2))
+            except Exception as exc:
+                LOGGER.error("Failed to write run summary: %s", exc)
 
     log_stage(Stage.FETCH, f"Processing {total_zips} ZIP codes")
 
@@ -592,31 +806,18 @@ def run_orchestrator(args: argparse.Namespace) -> int:
             }
         )
 
-    log_stage(Stage.PERSIST, "Writing run summary")
+        if flush_every and idx % flush_every == 0:
+            log_stage(
+                Stage.PERSIST,
+                f"[{idx}/{total_zips}] Flushing artifacts and refreshing deliverables",
+            )
+            persist_progress(final=False)
+
+    log_stage(Stage.PERSIST, "Persisting run outputs")
     run_completed = datetime.utcnow()
-    run_summary = {
-        "run_id": run_id,
-        "started_at": run_started.isoformat() + "Z",
-        "completed_at": run_completed.isoformat() + "Z",
-        "zip_total": total_zips,
-        "zip_processed": len(zip_summaries),
-        "blocked_count": len(blocked_events),
-        "error_count": len(error_events),
-        "unique_dealers": len(accumulator),
-        "zip_summaries": zip_summaries,
-        "blocked_events": blocked_events,
-        "error_events": error_events,
-        "aborted": abort_requested,
-        "retry_policy": {
-            "max_retries": max_attempts - 1,
-            "initial_delay_seconds": base_delay,
-            "backoff_multiplier": retry_backoff,
-            "prompt_on_block_requested": bool(args.prompt_on_block),
-            "prompt_on_block_enabled": bool(prompt_enabled),
-        },
-    }
-    (run_dir / "run_summary.json").write_text(json.dumps(run_summary, indent=2))
-    (run_dir / "normalized_dealers.json").write_text(json.dumps(accumulator.to_list(), indent=2))
+    run_state["aborted"] = abort_requested
+    completed_at = run_completed.isoformat() + "Z"
+    persist_progress(final=True, completed_at=completed_at)
 
     status_word = "aborted" if abort_requested else "complete"
     LOGGER.info(

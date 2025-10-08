@@ -11,7 +11,7 @@
 - Dealer records will capture normalized address/phone/email fields plus Holosun-provided IDs and lat/lng; deduplication hinges on a SHA256 of normalized name + street + city + postal code while tracking first/last seen timestamps for auditability.
 - Request geocoding will rely on offline ZIP centroids bundled with our dataset so Playwright is not required for production runs; Holosun response coordinates remain the authoritative dealer points we export.
 - Operator experience: run controller will report stage-by-stage progress (collecting ZIPs, submitting requests, normalizing, exporting), track metrics, and pause with instructions when anti-automation triggers occur.
-- Data persistence plan: store raw payloads per ZIP for audit, normalize/de-duplicate into an in-memory or SQLite cache, then write `dealers.csv` and `zip_audit.csv` with traceable provenance.
+- Data persistence plan: store raw payloads per ZIP for audit, keep a richer `normalized_dealers.json` for provenance, and continuously refresh the deliverable `holosun_ca_dealers.csv` (trimmed to assignment-required columns) plus metrics/json summaries as batches complete.
 
 ## Implemented Artifacts
 - `docs/project-notes.md`: living design/documentation, continuously updated (architecture, TODO backlog, change log).
@@ -19,7 +19,7 @@
 - `scripts/fetch_ca_zip_codes.py`: CLI ingestion script producing `data/processed/ca_zip_codes.csv` (1,678 entries with latitude/longitude populated) and `data/processed/ca_zip_codes.metadata.json` logging primary, fallback, and override sources.
 - `scripts/fetch_single_zip.py`: proof-of-concept fetcher that reads offline centroids, submits direct POST requests, performs anti-automation checks, and writes request/response/normalized artifacts to `data/raw/single_zip_runs/`.
 - `scripts/orchestrate_zip_runs.py`: stage-aware controller that sequences ZIP iteration, handles anti-automation detections with configurable retry/backoff and optional interactive prompts, accumulates deduplicated dealer records, and writes run artifacts to `data/raw/orchestrator_runs/<run_id>/`.
-- `scripts/export_normalized_dealers.py` + `holosun_locator.exports`: CSV export/validation pipeline that converts `normalized_dealers.json` into delivery-ready CSV files, emits spot-check metrics, and enforces schema validation; accompanied by pytest coverage under `tests/test_exports.py`.
+- `scripts/export_normalized_dealers.py` + `holosun_locator.exports`: CSV export/validation pipeline that converts `normalized_dealers.json` into the reduced handoff schema, emits spot-check metrics, and enforces validation; accompanied by pytest coverage under `tests/test_exports.py`.
 - Repository scaffolding: structured directories for docs, src, scripts, config, data, logs, tests; `.gitignore` tuned to include curated data artifacts.
 
 ## Current Work State (2025-10-08)
@@ -30,7 +30,7 @@
 - Export pipeline (`scripts/export_normalized_dealers.py`) operational for turning `normalized_dealers.json` into CSV and metrics artifacts; validation helpers and pytest coverage confirm schema expectations.
 
 ## Outstanding TODO Highlights
-- Automate CSV export + metrics emission immediately after successful orchestrator runs to streamline deliverables.
+- Automate CSV export + metrics emission immediately after successful orchestrator runs, including batch flushing so long runs can stream updates and resume mid-way.
 - Build a resume flow that replays blocked ZIPs recorded in `logs/manual_attention.log` or previous run summaries.
 - Expand release documentation (README, operator handbook) and finalize validation checklist before full-batch execution.
 

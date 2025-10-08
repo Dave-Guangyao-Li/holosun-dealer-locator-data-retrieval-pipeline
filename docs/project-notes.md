@@ -30,9 +30,9 @@ Last updated: 2025-10-08
    - Convert raw responses into structured models; normalize addresses (usaddress), phones (phonenumbers), URLs (urlparse).
    - Generate stable dealer IDs (hash of name + normalized street + city) for deduplication.
 5. **Persistence and Delivery**
-   - Store raw per-ZIP payloads (newline JSON) for audit.
-   - Aggregate normalized dealers in memory or SQLite before CSV export.
-   - Write final `dealers.csv` sorted by dealer name then city, plus `zip_audit.csv` summarizing counts per ZIP.
+   - Store raw per-ZIP payloads (newline JSON) for audit alongside a richer `normalized_dealers.json` snapshot that keeps IDs, timestamps, and geocodes for troubleshooting.
+   - Aggregate normalized dealers in memory or SQLite before CSV export, flushing batches to disk periodically so long runs can resume without replaying completed ZIPs.
+   - Auto-render the deliverable CSV (`holosun_ca_dealers.csv`) after each flush, trimmed to assignment-required columns (`dealer_name`, `street`, `city`, `state`, `postal_code`, `phone`, `website`, `source_zip`) while keeping metrics JSON and audit CSVs in the run directory.
 6. **Quality and Observability**
    - Structured logging, retry with exponential backoff, summary report after run.
    - .env driven configuration for endpoints, rate limits, and logging levels.
@@ -135,6 +135,7 @@ Last updated: 2025-10-08
 - Confirm whether downstream consumers expect geocoding or map visualization (currently out of scope).
 
 ## Change Log
+- **2025-10-08**: Documented the final handoff CSV schema, outlined incremental batch flushing + resume strategy, and planned automatic exporter/metrics hooks inside the orchestrator.
 - **2025-10-08**: Hardened the run orchestrator with configurable retry/backoff plus interactive prompts, added CSV export/validation tooling with metrics JSON output, and introduced pytest coverage for the exporter utilities.
 - **2025-10-08**: Executed Playwright recon for ZIPs 94105 and 90001, refreshed `scripts/capture_locator_traffic.py` selectors/response waiting, archived raw payloads under `data/raw/network/20251008_*`, and documented the dealer API envelope plus normalization considerations.
 - **2025-10-08**: Enriched CA ZIP reference data with centroid coordinates via OpenDataDE GeoJSON + USCities fallback, added manual overrides for outliers, and regenerated processed CSV/metadata.
