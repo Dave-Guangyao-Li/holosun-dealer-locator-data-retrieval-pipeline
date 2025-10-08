@@ -16,6 +16,7 @@ Last updated: current session
 ## Architecture Overview
 1. **Discovery and Recon**
    - Manual or scripted DevTools-style capture (e.g., Playwright with network logging) to enumerate request payloads, authentication headers, pagination behavior, and rate limits without yet writing the full scraper.
+   - Maintain a dedicated script (see `scripts/capture_locator_traffic.py`) that runs headless, records request/response pairs to `data/raw/network/`, and emits a YAML summary for analysis.
    - Record any anti-bot signals (CAPTCHA, session tokens) and define how the automation will surface them to the operator.
 2. **ZIP Code Provider**
    - Automate retrieval of a canonical California ZIP list from trusted open data (e.g., public Opendatasoft API, Census downloads) using a lightweight ingestion script committed to `scripts/`.
@@ -54,7 +55,7 @@ Last updated: current session
 - Potential lightweight CLI or API endpoints could be optional future enhancements but are out of initial scope.
 
 ## TODO Backlog
-- [ ] Capture live network behavior of the dealer locator and catalog endpoints, headers, pagination limits.
+- [ ] Capture live network behavior of the dealer locator via `scripts/capture_locator_traffic.py`, storing request/response payloads and annotated summaries.
 - [ ] Compile authoritative list of California ZIP codes; validate counts and deduplicate.
 - [ ] Define dealer data model, normalization rules, and deduplication key strategy.
 - [ ] Build proof-of-concept fetcher for a single ZIP including anti-automation detection hooks.
@@ -73,4 +74,4 @@ Last updated: current session
 - Confirm whether downstream consumers expect geocoding or map visualization (currently out of scope).
 
 ## Change Log
-- **Current session**: Added anti-automation mitigation plan, clarified backend classification, consolidated architecture summary with automation-first recon/ZIP sourcing guidance, documented operator progress reporting expectations, curated TODO backlog, scaffolded repository structure.
+- **Current session**: Added anti-automation mitigation plan, clarified backend classification, consolidated architecture summary with automation-first recon/ZIP sourcing guidance and dedicated network capture script plan, documented operator progress reporting expectations, curated TODO backlog, scaffolded repository structure.
