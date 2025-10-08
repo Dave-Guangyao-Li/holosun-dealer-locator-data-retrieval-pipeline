@@ -13,18 +13,18 @@
 
 ## Implemented Artifacts
 - `docs/project-notes.md`: living design/documentation, continuously updated (architecture, TODO backlog, change log).
-- `scripts/capture_locator_traffic.py`: asynchronous Playwright utility ready for reconnaissance runs (not yet executed; TODO remains open).
+- `scripts/capture_locator_traffic.py`: asynchronous Playwright recon utility (headless by default) now tuned to the current Holosun DOM selectors and response timing; outputs JSON/YAML summaries plus raw bodies under `data/raw/network/<timestamp_zip>/`.
 - `scripts/fetch_ca_zip_codes.py`: CLI ingestion script producing `data/processed/ca_zip_codes.csv` (1,678 entries) and `data/processed/ca_zip_codes.metadata.json` with source details.
 - Repository scaffolding: structured directories for docs, src, scripts, config, data, logs, tests; `.gitignore` tuned to include curated data artifacts.
 
 ## Current Work State (2025-10-08)
-- Latest changes staged locally (awaiting commit approval): documentation updates, ZIP ingestion script, generated CSV/metadata, `.gitignore` adjustments.
-- `Capture live network behavior` TODO remains unchecked because the recon script has not been run against the live site; executing it will provide the raw payload schema needed for the dealer data model.
-- Next critical task: run `scripts/capture_locator_traffic.py` to observe actual API responses, then design the dealer data model and normalization logic based on real payloads.
+- Latest changes staged locally (awaiting commit approval): recon script selector updates, new network capture artifacts under `data/raw/network/20251008_*`, and documentation refreshes.
+- Playwright recon completed headless runs for ZIPs 94105 (no dealers) and 90001 (one dealer), confirming the POST `https://holosun.com/index/dealer/search.html` request shape (`keywords`, `distance`, `lat`, `lng`, `cate`) and the response schema (`data.center`, `data.list[*]`).
+- Next critical task: translate the captured payload into a dealer data model and normalization/deduplication plan before implementing the proof-of-concept fetcher.
 
 ## Outstanding TODO Highlights
-- Execute reconnaissance capture and analyze response structure.
-- Define dealer data model, normalization/deduplication strategy, and proof-of-concept fetcher.
+- Define dealer data model, normalization/deduplication strategy, and implement a proof-of-concept fetcher informed by the recon payloads.
+- Evaluate geocoding approach (reuse Holosun map lat/lng vs. offline ZIP coordinate table) to minimize external dependencies during full-scale runs.
 - Implement progress-aware run orchestrator, resilience features (retry/backoff/manual prompts), CSV writer, tests, and delivery checklist.
 
 ## Open Risks & Questions

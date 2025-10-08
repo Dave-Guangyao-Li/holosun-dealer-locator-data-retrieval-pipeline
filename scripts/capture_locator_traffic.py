@@ -70,17 +70,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--input-selector",
-        default="input[name=zip]",
+        default="#map_location",
         help="CSS selector for the ZIP input field. Override if the site structure changes.",
     )
     parser.add_argument(
         "--submit-selector",
-        default="button[type=submit]",
+        default="#hkmap_button",
         help="CSS selector for the submit button that triggers the dealer search.",
     )
     parser.add_argument(
         "--wait-selector",
-        default=".dealer-card",
+        default="#map",
         help="CSS selector that indicates results were rendered. Used to time completion.",
     )
     parser.add_argument(
@@ -94,6 +94,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=25,
         help="Maximum number of network responses to persist before the run stops automatically.",
+    )
+    parser.add_argument(
+        "--result-url-fragment",
+        default="dealer/search",
+        help="Substring to match in a response URL that indicates the dealer payload was returned.",
     )
     return parser
 
@@ -186,9 +191,25 @@ async def submit_zip(page: Page, args: argparse.Namespace) -> None:
     LOGGER.info("Navigating to locator page: %s", args.url)
     await page.goto(args.url, wait_until="domcontentloaded")
 
+    input_locator = page.locator(args.input_selector)
+    LOGGER.info("Waiting for ZIP input: %s", args.input_selector)
+    await input_locator.wait_for(state="attached", timeout=args.timeout)
+
     LOGGER.info("Filling ZIP code %s", args.zip_code)
-    await page.fill(args.input_selector, args.zip_code, timeout=args.timeout)
-    await page.click(args.submit_selector, timeout=args.timeout)
+    await input_locator.fill(args.zip_code)
+
+    submit_locator = page.locator(args.submit_selector)
+    LOGGER.info("Waiting for submit control: %s", args.submit_selector)
+    await submit_locator.wait_for(state="attached", timeout=args.timeout)
+    LOGGER.info("Waiting for dealer response containing '%s'", args.result_url_fragment)
+    async with page.expect_response(
+        lambda response: args.result_url_fragment in response.url,
+        timeout=args.timeout,
+    ) as dealer_response:
+        await submit_locator.click()
+
+    await dealer_response.value
+
     LOGGER.info("Submitted search; waiting for results selector %s", args.wait_selector)
     await page.wait_for_selector(args.wait_selector, timeout=args.timeout)
 
