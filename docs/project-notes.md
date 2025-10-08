@@ -134,8 +134,10 @@ Last updated: 2025-10-09
 - Site structure could change; isolate selectors, endpoints, and configs for maintainability.
 - Need decision on hosting/CI expectations for the public repo (e.g., GitHub Actions for lint/tests?).
 - Confirm whether downstream consumers expect geocoding or map visualization (currently out of scope).
+- Wide-radius queries can surface out-of-state dealer mailing addresses; final deliverable now filters to California-only rows, but normalized payloads still contain the full set for audit.
 
 ## Change Log
+- **2025-10-09**: Filtered deliverable exports to California-only rows (state CA or ZIP 90001-96162) after discovering Nevada/Montana entries from 100-mile radius runs; added pytest coverage and updated operator docs/notes.
 - **2025-10-08**: Hardened address parsing + dedup logic (proper city/state/ZIP extraction, removal of source ZIP from deliverable, address-only CSV output), added regression tests, and verified clean-room rerun workflow.
 - **2025-10-08**: Enabled orchestrator resume/replay tooling (`--resume-state`, `--resume-policy`, `--include-manual-log`), wired automatic deliverable + metrics refresh on each flush/finalization, added pytest coverage for resume helpers, and drafted operator-facing README + release checklist.
 - **2025-10-08**: Documented the final handoff CSV schema, outlined incremental batch flushing + resume strategy, and planned automatic exporter/metrics hooks inside the orchestrator.

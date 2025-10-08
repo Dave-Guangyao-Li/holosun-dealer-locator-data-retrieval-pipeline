@@ -52,6 +52,8 @@ CITY_STATE_ZIP_RE = re.compile(
 )
 STATE_POSTAL_REGEX = re.compile(r"(?P<state>[A-Z]{2})\s+(?P<postal>\d{5})(?:-\d{4})?$")
 POSTAL_REGEX = re.compile(r"(\d{5})(?:-\d{4})?$")
+CA_POSTAL_MIN = 90001
+CA_POSTAL_MAX = 96162
 STREET_SUFFIX_TOKENS = {
     "st",
     "st.",
@@ -116,6 +118,27 @@ def normalize_postal(value: Optional[str]) -> Optional[str]:
     if not match:
         return None
     return match.group(0)
+
+
+def is_california_postal(value: Optional[str]) -> bool:
+    postal = normalize_postal(value)
+    if not postal:
+        return False
+    try:
+        numeric_postal = int(postal)
+    except ValueError:
+        return False
+    return CA_POSTAL_MIN <= numeric_postal <= CA_POSTAL_MAX
+
+
+def is_california_dealer(dealer: Dict[str, Any]) -> bool:
+    state = (dealer.get("state") or "").strip().upper()
+    if state == "CA":
+        return True
+    postal_code = dealer.get("postal_code")
+    if is_california_postal(postal_code):
+        return True
+    return False
 
 
 class Stage:
@@ -461,6 +484,8 @@ def build_deliverable_rows(
 
     rows: List[Dict[str, Any]] = []
     for dealer in dealers:
+        if not is_california_dealer(dealer):
+            continue
         address_parts: List[str] = []
         street = dealer.get("street")
         city = dealer.get("city")

@@ -55,3 +55,44 @@ def test_build_deliverable_rows_address_format() -> None:
             "website": "example.com",
         }
     ]
+
+
+def test_build_deliverable_rows_filters_non_california_postal() -> None:
+    dealers = [
+        {
+            "dealer_name": "Out Of State Dealer",
+            "street": "555 Border Rd",
+            "city": "Reno",
+            "state": "NV",
+            "postal_code": "89434",
+            "phone": "555-1111",
+            "website": "example.com",
+        }
+    ]
+
+    rows = build_deliverable_rows(dealers, list_delimiter="|")
+    assert rows == []
+
+
+def test_build_deliverable_rows_allows_state_only_match() -> None:
+    dealers = [
+        {
+            "dealer_name": "Postal Missing Dealer",
+            "street": "789 Coast Hwy",
+            "city": "San Diego",
+            "state": "CA",
+            "postal_code": "",
+            "phone": "555-2222",
+            "website": "example.org",
+        }
+    ]
+
+    rows = build_deliverable_rows(dealers, list_delimiter="|")
+    assert rows == [
+        {
+            "dealer_name": "Postal Missing Dealer",
+            "address": "789 Coast Hwy, San Diego, CA",
+            "phone": "555-2222",
+            "website": "example.org",
+        }
+    ]

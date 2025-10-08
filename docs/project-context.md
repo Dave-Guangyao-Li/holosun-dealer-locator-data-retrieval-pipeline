@@ -11,7 +11,7 @@
 - Dealer records will capture normalized address/phone/email fields plus Holosun-provided IDs and lat/lng; deduplication hinges on a SHA256 of normalized name + street + city + postal code while tracking first/last seen timestamps for auditability.
 - Request geocoding will rely on offline ZIP centroids bundled with our dataset so Playwright is not required for production runs; Holosun response coordinates remain the authoritative dealer points we export.
 - Operator experience: run controller will report stage-by-stage progress (collecting ZIPs, submitting requests, normalizing, exporting), track metrics, and pause with instructions when anti-automation triggers occur.
-- Data persistence plan: store raw payloads per ZIP for audit, keep a richer `normalized_dealers.json` for provenance, and continuously refresh the deliverable `holosun_ca_dealers.csv` (trimmed to assignment-required columns) plus metrics/json summaries as batches complete.
+- Data persistence plan: store raw payloads per ZIP for audit, keep a richer `normalized_dealers.json` for provenance, and continuously refresh the deliverable `holosun_ca_dealers.csv` (trimmed to assignment-required columns and filtered to California-only rows) plus metrics/json summaries as batches complete.
 
 ## Implemented Artifacts
 - `docs/project-notes.md`: living design/documentation, continuously updated (architecture, TODO backlog, change log).
@@ -30,7 +30,7 @@
 - Export pipeline (`scripts/export_normalized_dealers.py`) operational for turning `normalized_dealers.json` into CSV and metrics artifacts; validation helpers and pytest coverage confirm schema expectations.
 - Orchestrator persistence now auto-refreshes deliverables/metrics on each flush, saves `run_state.json`, and supports resumable runs via `--resume-state`/`--resume-policy` with optional blocked ZIP replay from `logs/manual_attention.log`.
 - Operator documentation refreshed: README now covers setup/run guidance and `docs/release-checklist.md` captures the pre-flight validation steps before publishing datasets.
-- Address parsing refinements now extract street/city/state/ZIP from single-line payloads, eliminate source-ZIP duplicates in the accumulator, and shrink the deliverable schema to `dealer_name/address/phone/website` for interview-ready handoffs.
+- Address parsing refinements now extract street/city/state/ZIP from single-line payloads, eliminate source-ZIP duplicates in the accumulator, shrink the deliverable schema to `dealer_name/address/phone/website`, and enforce a California-only filter (state or ZIP range) when exporting the final CSV.
 
 ## Outstanding TODO Highlights
 - Backlog cleared for this milestone; future work will be tracked via new tickets as requirements evolve.

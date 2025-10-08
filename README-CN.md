@@ -53,7 +53,7 @@ python scripts/orchestrate_zip_runs.py \
 - 生成运行目录 `data/raw/orchestrator_runs/<run_id>/`，例如 `20251009T023000Z/`，包含：
   - `run_state.json`（运行时进度快照）与 `run_summary.json`（结束后写入）。
   - `normalized_dealers.json` / `normalized_dealers.csv`（完整标准化结果）。
-  - `holosun_ca_dealers.csv`（精简交付 CSV，字段为 `dealer_name`、`address`、`phone`、`website`）及 `<deliverable>.metrics.json`（度量信息）。交付物默认位于运行目录内，如需集中存放可复制到 `data/processed/`。
+  - `holosun_ca_dealers.csv`（精简交付 CSV，字段为 `dealer_name`、`address`、`phone`、`website`，已根据邮编区间/州名自动过滤为加州经销商）及 `<deliverable>.metrics.json`（度量信息）。交付物默认位于运行目录内，如需集中存放可复制到 `data/processed/`。
   - 若未使用 `--skip-raw`，`zip_runs/<zip>` 目录内保留每个邮编的原始请求/响应工件。
 - 每次批量刷新会打印类似 `Metrics snapshot: total=185, unique=175, with_phone=140` 的统计行。
 
@@ -104,7 +104,7 @@ python scripts/export_normalized_dealers.py \
 ### 5. 运行结束自检
 - 查看 `run_summary.json`，确认 `blocked_count` / `error_count` 是否为零。
 - 检查 `logs/manual_attention.log`，评估是否仍需人工处理。
-- 抽样核查 `holosun_ca_dealers.csv`（字段齐全、无异常换行）。
+- 抽样核查 `holosun_ca_dealers.csv`（字段齐全、无异常换行，且全部为加州地址——邮编 90001-96162 或州名 CA）。
 - 比较 `<deliverable>.metrics.json` 与历史版本，注意异常波动。
 - 发布前务必执行 `docs/release-checklist.md` 中的完整核对表。
 

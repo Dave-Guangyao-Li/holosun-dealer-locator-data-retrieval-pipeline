@@ -55,7 +55,7 @@ What to expect:
   - `run_state.json` tracks progress during the run.
   - `run_summary.json` appears at completion.
   - `normalized_dealers.json` / `normalized_dealers.csv` hold full normalized records.
-  - `holosun_ca_dealers.csv` (trimmed deliverable with columns `dealer_name`, `address`, `phone`, `website`) and `<deliverable>.metrics.json` expose final outputs. Deliverables remain inside the run directory; copy them to `data/processed/` if you need a consolidated handoff.
+  - `holosun_ca_dealers.csv` (trimmed deliverable with columns `dealer_name`, `address`, `phone`, `website`) automatically filters to California dealers based on the postal range/state and `<deliverable>.metrics.json` exposes final outputs. Deliverables remain inside the run directory; copy them to `data/processed/` if you need a consolidated handoff.
   - When `--skip-raw` is omitted, `zip_runs/<zip>` folders store per-ZIP artifacts.
 - Metrics log lines similar to `Metrics snapshot: total=185, unique=175, with_phone=140` during each flush.
 
@@ -107,7 +107,7 @@ Use this when consumers request a reformatted CSV or independent metrics run. Ex
 ### 5. Post-Run Checklist
 - Review `run_summary.json` for non-zero `blocked_count` or `error_count`.
 - Inspect `logs/manual_attention.log` lines for unresolved issues.
-- Spot-check `holosun_ca_dealers.csv` for schema and data cleanliness (no embedded newlines, consistent ZIP padding).
+- Spot-check `holosun_ca_dealers.csv` for schema, data cleanliness, and confirm all rows resolve to California locations (ZIPs 90001-96162 or `state == CA`).
 - Compare `<deliverable>.metrics.json` against prior runs for anomalies.
 - Complete the full release checklist in `docs/release-checklist.md` before distributing artifacts.
 

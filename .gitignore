@@ -26,3 +26,5 @@ data/processed/*
 # Logs (keep placeholder)
 logs/*
 !logs/.gitkeep
+
+docs/project-walkthrough.md
