@@ -86,18 +86,25 @@ Last updated: 2025-10-08
 - Aggregates normalized dealers through a SHA256-based dedup key (`dealer_name` + street + city + postal code), tracking `first_seen_at`/`last_seen_at`, origin ZIPs, run IDs, holosun IDs, emails, and merged address lines.
 - Persists per-ZIP artifacts under `data/raw/orchestrator_runs/<run_id>/zip_runs/` (reusing the single ZIP artifact structure), records anti-automation hits to `blocked_zips/` plus `logs/manual_attention.log` (created lazily on first block), and writes `run_summary.json` with zip-by-zip metrics.
 - Produces `normalized_dealers.json` capturing the deduplicated dealer catalog for downstream CSV export and validation tooling.
+- Supports resilient retries via `--max-retries`, `--retry-delay`, and `--retry-backoff`, and can prompt interactively on blocked ZIPs when `--prompt-on-block` is supplied from a TTY, allowing operators to retry, skip, or abort without restarting the run.
+
+## CSV Export and Validation (2025-10-08)
+- Implemented `holosun_locator.exports` with helpers to load, validate, summarize, and serialize normalized dealer payloads.
+- Added `scripts/export_normalized_dealers.py` CLI for exporting `normalized_dealers.json` to CSV, emitting spot-check metrics, and optionally writing metrics JSON; supports list delimiters and strict validation with `--fail-on-validation`.
+- Spot metrics cover dealer counts, duplicate IDs, phone/email completeness, geocode coverage, and ZIP/run breadth to highlight gaps before delivery.
+- Introduced `tests/test_exports.py` exercising validation, CSV serialization, and metrics calculations (running under `pytest`).
 
 ## Operator Feedback and Progress Reporting
 - Provide a high-level run controller that surfaces stage-based updates (e.g., collecting ZIPs, submitting locator requests, normalizing data, exporting CSV) to stdout and structured logs.
 - Emit progress metrics such as processed ZIP count, dealer records accumulated, and retry/backoff events to keep the operator informed in long runs.
-- When errors or anti-automation blocks occur, display clear instructions on next actions, capture the context in `logs/`, and optionally pause for manual input when `--interactive` is enabled.
+- When errors or anti-automation blocks occur, display clear instructions on next actions, capture the context in `logs/`, and optionally pause for manual input when `--prompt-on-block` is enabled and a TTY is available.
 - Persist a run summary artifact (JSON or Markdown) outlining total steps, successes/failures, and manual follow-ups required.
 
 ## Anti-Automation Mitigation Strategy
 - **Detection**: monitor response payloads/status codes for CAPTCHA markers, HTML challenge pages, or unusual HTTP codes (429, 403, 503).
 - **Manual Intervention Hooks**:
   - Implement explicit checkpoints that surface actionable prompts when detection triggers (e.g., pause run, write to console and log instructions for manual resolution).
-  - Provide CLI flag `--interactive` to prompt operator before retrying blocked ZIPs.
+  - Provide CLI flag `--prompt-on-block` to prompt the operator before retrying blocked ZIPs; exponential backoff retries run automatically when prompts are skipped or disabled.
   - Persist blocked ZIPs to `logs/manual_attention.log` for follow-up.
 - **Fallbacks**: allow operator to inject fresh session cookies or swap to manual browser export for affected ZIPs.
 
@@ -112,8 +119,10 @@ Last updated: 2025-10-08
 - [x] Build proof-of-concept fetcher for a single ZIP including anti-automation detection hooks. (2025-10-08 via `scripts/fetch_single_zip.py` writing to `data/raw/single_zip_runs/`.)
 - [x] Implement stage-aware run orchestrator that reports progress, surfaces manual-intervention prompts, and stores run summaries. (2025-10-08 via `scripts/orchestrate_zip_runs.py`.)
 - [x] Implement stateful deduplication and accumulator for merging records across ZIPs. (2025-10-08 orchestrator ingest pipeline emits `normalized_dealers.json`.)
-- [ ] Add resilient retry/backoff, logging, and manual-intervention prompts when encountering blocks.
-- [ ] Create CSV writer and validation scripts (spot-checks, summary metrics).
+- [x] Add resilient retry/backoff, logging, and manual-intervention prompts when encountering blocks. (2025-10-08: orchestrator `--max-retries`/`--retry-delay`/`--prompt-on-block` flow.)
+- [x] Create CSV writer and validation scripts (spot-checks, summary metrics). (2025-10-08: `scripts/export_normalized_dealers.py` + `holosun_locator.exports`.)
+- [ ] Automate CSV export and metrics emission at the end of orchestrator runs.
+- [ ] Design resume tooling to replay blocked ZIPs from `logs/manual_attention.log` or run summaries.
 - [ ] Draft README with setup, run instructions, and ethical scraping guidelines.
 - [ ] Prepare release checklist (data validation, documentation updates, final CSV verification).
 - [x] Enriched `data/processed/ca_zip_codes.csv` with offline ZIP centroid latitude/longitude for request payloads (2025-10-08).
@@ -126,6 +135,7 @@ Last updated: 2025-10-08
 - Confirm whether downstream consumers expect geocoding or map visualization (currently out of scope).
 
 ## Change Log
+- **2025-10-08**: Hardened the run orchestrator with configurable retry/backoff plus interactive prompts, added CSV export/validation tooling with metrics JSON output, and introduced pytest coverage for the exporter utilities.
 - **2025-10-08**: Executed Playwright recon for ZIPs 94105 and 90001, refreshed `scripts/capture_locator_traffic.py` selectors/response waiting, archived raw payloads under `data/raw/network/20251008_*`, and documented the dealer API envelope plus normalization considerations.
 - **2025-10-08**: Enriched CA ZIP reference data with centroid coordinates via OpenDataDE GeoJSON + USCities fallback, added manual overrides for outliers, and regenerated processed CSV/metadata.
 - **2025-10-08**: Shipped `scripts/fetch_single_zip.py`, delivering offline-centroid driven single-ZIP lookups, anti-automation detection, and normalized artifact dumps under `data/raw/single_zip_runs/`.

@@ -9,12 +9,12 @@ and persists both raw artifacts and run summaries under
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import hashlib
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -283,6 +283,29 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable debug logging output.",
     )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=2,
+        help="Retry a failed ZIP this many times (in addition to the initial attempt).",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=5.0,
+        help="Initial delay in seconds before retrying a ZIP after a failure.",
+    )
+    parser.add_argument(
+        "--retry-backoff",
+        type=float,
+        default=2.0,
+        help="Multiplier applied to the retry delay after each failed attempt.",
+    )
+    parser.add_argument(
+        "--prompt-on-block",
+        action="store_true",
+        help="Prompt interactively when a ZIP is blocked to choose retry/skip/abort.",
+    )
     return parser
 
 
@@ -295,6 +318,35 @@ def configure_logging(verbose: bool) -> None:
 
 def log_stage(stage: str, message: str) -> None:
     LOGGER.info("[stage:%s] %s", stage, message)
+
+
+def compute_retry_delay(base_delay: float, backoff: float, attempt_index: int) -> float:
+    if attempt_index <= 0:
+        return 0.0
+    computed = base_delay * (backoff ** max(attempt_index - 1, 0))
+    return max(computed, 0.0)
+
+
+def prompt_block_action(zip_code: str, attempt: int, max_attempts: int) -> str:
+    prompt = (
+        f"ZIP {zip_code} was blocked (attempt {attempt}/{max_attempts}). "
+        "Choose action: [r]etry / [s]kip / [a]bort > "
+    )
+    while True:
+        try:
+            decision = input(prompt)
+        except EOFError:
+            return "skip"
+        if not decision:
+            decision = "r"
+        decision = decision.strip().lower()
+        if decision in {"r", "retry"}:
+            return "retry"
+        if decision in {"s", "skip"}:
+            return "skip"
+        if decision in {"a", "abort"}:
+            return "abort"
+        print("Please enter 'r', 's', or 'a'.")
 
 
 def expand_zip_list(zip_args: Optional[Sequence[str]], *, centroids: Dict[str, Dict[str, Any]]) -> List[str]:
@@ -376,17 +428,30 @@ def run_orchestrator(args: argparse.Namespace) -> int:
     blocked_events: List[Dict[str, Any]] = []
     error_events: List[Dict[str, Any]] = []
 
+    prompt_enabled = args.prompt_on_block and sys.stdin.isatty()
+    if args.prompt_on_block and not prompt_enabled:
+        LOGGER.warning(
+            "Prompt-on-block requested but stdin is not interactive; proceeding without prompts.")
+
+    max_attempts = max(args.max_retries, 0) + 1
+    base_delay = max(args.retry_delay, 0.0)
+    retry_backoff = args.retry_backoff if args.retry_backoff > 0 else 1.0
+
     total_zips = len(target_zips)
+    abort_requested = False
+
     log_stage(Stage.FETCH, f"Processing {total_zips} ZIP codes")
 
     for idx, zip_code in enumerate(target_zips, start=1):
+        if abort_requested:
+            break
+
         centroid = centroids.get(zip_code)
         if not centroid:
             error_events.append({"zip_code": zip_code, "error": "Centroid missing"})
             LOGGER.error("ZIP %s missing from centroid mapping", zip_code)
             continue
 
-        log_stage(Stage.FETCH, f"[{idx}/{total_zips}] ZIP {zip_code}: submitting request")
         try:
             payload = prepare_payload(zip_code, centroid, args.distance, args.category)
         except Exception as exc:
@@ -394,30 +459,111 @@ def run_orchestrator(args: argparse.Namespace) -> int:
             error_events.append({"zip_code": zip_code, "error": str(exc)})
             continue
 
-        response = None
-        body_text = None
-        try:
-            response, body_text = perform_request(payload, timeout=args.timeout, user_agent=args.user_agent)
-            issues = detect_anti_automation(response, body_text)
-            if issues:
-                raise AntiAutomationError("; ".join(issues))
-            response_data = response.json()
-        except AntiAutomationError as exc:
-            LOGGER.warning("ZIP %s flagged as anti-automation: %s", zip_code, exc)
-            artifact_path = append_manual_attention(run_dir, zip_code, str(exc), payload, response=response, body_text=body_text)
-            blocked_events.append({"zip_code": zip_code, "issues": str(exc), "artifact": str(artifact_path)})
-            continue
-        except Exception as exc:
-            LOGGER.error("Request failed for ZIP %s: %s", zip_code, exc)
-            error_events.append({"zip_code": zip_code, "error": str(exc)})
+        attempt = 1
+        zip_success = False
+        response: Optional[requests.Response] = None
+        response_data: Optional[Dict[str, Any]] = None
+        body_text: Optional[str] = None
+        blocked_metadata: Optional[Dict[str, Any]] = None
+
+        while attempt <= max_attempts:
+            log_stage(
+                Stage.FETCH,
+                f"[{idx}/{total_zips}] ZIP {zip_code}: submitting request (attempt {attempt}/{max_attempts})",
+            )
+            try:
+                response, body_text = perform_request(payload, timeout=args.timeout, user_agent=args.user_agent)
+                issues = detect_anti_automation(response, body_text)
+                if issues:
+                    raise AntiAutomationError("; ".join(issues))
+                response_data = response.json()
+            except AntiAutomationError as exc:
+                block_message = str(exc)
+                LOGGER.warning(
+                    "ZIP %s flagged as anti-automation (attempt %d/%d): %s",
+                    zip_code,
+                    attempt,
+                    max_attempts,
+                    block_message,
+                )
+                should_retry = attempt < max_attempts
+                decision = "retry" if should_retry else "skip"
+                if prompt_enabled and should_retry:
+                    decision = prompt_block_action(zip_code, attempt, max_attempts)
+                if decision == "retry" and should_retry:
+                    delay = compute_retry_delay(base_delay, retry_backoff, attempt)
+                    if delay > 0:
+                        LOGGER.info("Waiting %.1fs before retrying ZIP %s after block", delay, zip_code)
+                        time.sleep(delay)
+                    attempt += 1
+                    continue
+                artifact_path = append_manual_attention(
+                    run_dir,
+                    zip_code,
+                    block_message,
+                    payload,
+                    response=response,
+                    body_text=body_text,
+                )
+                resolution = (
+                    "abort"
+                    if decision == "abort"
+                    else "skipped"
+                    if decision == "skip"
+                    else "exhausted"
+                )
+                blocked_metadata = {
+                    "zip_code": zip_code,
+                    "issues": block_message,
+                    "artifact": str(artifact_path),
+                    "attempts": attempt,
+                    "resolution": resolution,
+                }
+                if decision == "abort":
+                    abort_requested = True
+                break
+            except Exception as exc:
+                LOGGER.error(
+                    "Request failed for ZIP %s (attempt %d/%d): %s",
+                    zip_code,
+                    attempt,
+                    max_attempts,
+                    exc,
+                )
+                if attempt >= max_attempts:
+                    error_events.append({"zip_code": zip_code, "error": str(exc), "attempts": attempt})
+                    break
+                delay = compute_retry_delay(base_delay, retry_backoff, attempt)
+                if delay > 0:
+                    LOGGER.info("Waiting %.1fs before retrying ZIP %s after error", delay, zip_code)
+                    time.sleep(delay)
+                attempt += 1
+                continue
+            else:
+                zip_success = True
+                break
+
+        if blocked_metadata:
+            blocked_events.append(blocked_metadata)
+        if abort_requested:
+            break
+        if not zip_success or response is None or response_data is None:
             continue
 
         dealers_raw: Iterable[Dict[str, Any]] = response_data.get("data", {}).get("list", []) or []
         normalized = [normalize_dealer(raw, zip_code) for raw in dealers_raw]
         observed_at = datetime.utcnow().isoformat() + "Z"
 
-        log_stage(Stage.NORMALIZE, f"[{idx}/{total_zips}] ZIP {zip_code}: normalized {len(normalized)} dealers")
-        total_count, new_count = accumulator.ingest(normalized, zip_code=zip_code, observed_at=observed_at, run_reference=run_id)
+        log_stage(
+            Stage.NORMALIZE,
+            f"[{idx}/{total_zips}] ZIP {zip_code}: normalized {len(normalized)} dealers (attempt {attempt})",
+        )
+        total_count, new_count = accumulator.ingest(
+            normalized,
+            zip_code=zip_code,
+            observed_at=observed_at,
+            run_reference=run_id,
+        )
 
         artifact_dir = None
         if not args.skip_raw:
@@ -442,6 +588,7 @@ def run_orchestrator(args: argparse.Namespace) -> int:
                 "total_dealers_seen": total_count,
                 "artifact_path": str(artifact_dir) if artifact_dir else None,
                 "observed_at": observed_at,
+                "attempts": attempt,
             }
         )
 
@@ -459,19 +606,29 @@ def run_orchestrator(args: argparse.Namespace) -> int:
         "zip_summaries": zip_summaries,
         "blocked_events": blocked_events,
         "error_events": error_events,
+        "aborted": abort_requested,
+        "retry_policy": {
+            "max_retries": max_attempts - 1,
+            "initial_delay_seconds": base_delay,
+            "backoff_multiplier": retry_backoff,
+            "prompt_on_block_requested": bool(args.prompt_on_block),
+            "prompt_on_block_enabled": bool(prompt_enabled),
+        },
     }
     (run_dir / "run_summary.json").write_text(json.dumps(run_summary, indent=2))
     (run_dir / "normalized_dealers.json").write_text(json.dumps(accumulator.to_list(), indent=2))
 
+    status_word = "aborted" if abort_requested else "complete"
     LOGGER.info(
-        "Run %s complete: %d ZIPs processed, %d unique dealers, %d blocked, %d errors",
+        "Run %s %s: %d ZIPs processed, %d unique dealers, %d blocked, %d errors",
         run_id,
+        status_word,
         len(zip_summaries),
         len(accumulator),
         len(blocked_events),
         len(error_events),
     )
-    return 0
+    return 4 if abort_requested else 0
 
 
 def main() -> int:
