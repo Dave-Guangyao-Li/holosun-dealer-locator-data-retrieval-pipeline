@@ -18,17 +18,18 @@
 - `scripts/capture_locator_traffic.py`: asynchronous Playwright recon utility (headless by default) now tuned to the current Holosun DOM selectors and response timing; outputs JSON/YAML summaries plus raw bodies under `data/raw/network/<timestamp_zip>/`.
 - `scripts/fetch_ca_zip_codes.py`: CLI ingestion script producing `data/processed/ca_zip_codes.csv` (1,678 entries with latitude/longitude populated) and `data/processed/ca_zip_codes.metadata.json` logging primary, fallback, and override sources.
 - `scripts/fetch_single_zip.py`: proof-of-concept fetcher that reads offline centroids, submits direct POST requests, performs anti-automation checks, and writes request/response/normalized artifacts to `data/raw/single_zip_runs/`.
+- `scripts/orchestrate_zip_runs.py`: stage-aware controller that sequences ZIP iteration, handles anti-automation detections, accumulates deduplicated dealer records, and writes run artifacts to `data/raw/orchestrator_runs/<run_id>/`.
 - Repository scaffolding: structured directories for docs, src, scripts, config, data, logs, tests; `.gitignore` tuned to include curated data artifacts.
 
 ## Current Work State (2025-10-08)
 - Latest changes staged locally (awaiting commit approval): recon script selector updates, new network capture artifacts under `data/raw/network/20251008_*`, centroid-enriched ZIP dataset regeneration, and documentation refreshes (dealer data model, normalization, deduplication, geocoding decisions).
 - Playwright recon completed headless runs for ZIPs 94105 (no dealers) and 90001 (one dealer), confirming the POST `https://holosun.com/index/dealer/search.html` request shape (`keywords`, `distance`, `lat`, `lng`, `cate`) and the response schema (`data.center`, `data.list[*]`).
 - Latest POC: single-ZIP fetcher validates the offline centroid workflow, surfaces anti-automation issues explicitly, and stores normalized summaries for quick inspection.
-- Next critical task: wire a stage-aware orchestrator that sequences ZIP iteration, handles retries/manual intervention, and persists normalized dealer data.
+- Stage-aware orchestrator now available via `scripts/orchestrate_zip_runs.py`, producing per-run summaries plus deduplicated dealer catalogs ready for CSV export.
 
 ## Outstanding TODO Highlights
-- Implement the progress-aware run orchestrator that stitches ZIP iteration, normalization, and persistence while respecting anti-automation guardrails.
-- Add resilience features (retry/backoff/manual prompts), CSV writer, test coverage, and release checklist ahead of full pipeline runs.
+- Layer retry/backoff strategies plus optional interactive prompts onto the orchestrator so blocked ZIPs can be retried or queued for manual handling without aborting the run.
+- Add CSV export/validation tooling, expand logging and tests, and finalize release documentation ahead of full pipeline runs.
 
 ## Open Risks & Questions
 - Anti-automation measures may require manual intervention; need clarity on acceptable levels of human involvement for the assignment.

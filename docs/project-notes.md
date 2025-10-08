@@ -81,6 +81,12 @@ Last updated: 2025-10-08
 - Normalization currently focuses on trimming phone prefixes, collapsing multiline addresses, and preserving emails for future enrichment; broader deduplication and persistence remain orchestrator responsibilities.
 - CLI supports `--skip-write` for smoke tests, configurable distance/category/user agent parameters, and defaults to the enriched centroid dataset so no live geocoder is required during requests.
 
+## Stage-Orchestrator Prototype (2025-10-08)
+- Added `scripts/orchestrate_zip_runs.py`, a stage-aware controller that loads centroid metadata, iterates requested ZIP codes, and funnels each lookup through the single-ZIP fetch flow while emitting `[stage:*]` progress logs.
+- Aggregates normalized dealers through a SHA256-based dedup key (`dealer_name` + street + city + postal code), tracking `first_seen_at`/`last_seen_at`, origin ZIPs, run IDs, holosun IDs, emails, and merged address lines.
+- Persists per-ZIP artifacts under `data/raw/orchestrator_runs/<run_id>/zip_runs/` (reusing the single ZIP artifact structure), records anti-automation hits to `blocked_zips/` plus `logs/manual_attention.log` (created lazily on first block), and writes `run_summary.json` with zip-by-zip metrics.
+- Produces `normalized_dealers.json` capturing the deduplicated dealer catalog for downstream CSV export and validation tooling.
+
 ## Operator Feedback and Progress Reporting
 - Provide a high-level run controller that surfaces stage-based updates (e.g., collecting ZIPs, submitting locator requests, normalizing data, exporting CSV) to stdout and structured logs.
 - Emit progress metrics such as processed ZIP count, dealer records accumulated, and retry/backoff events to keep the operator informed in long runs.
@@ -104,8 +110,8 @@ Last updated: 2025-10-08
 - [x] Implemented `scripts/fetch_ca_zip_codes.py` to download and validate California ZIP data, exporting to `data/processed/ca_zip_codes.csv` with source metadata.
 - [x] Documented dealer data model, normalization rules, and deduplication key strategy (2025-10-08).
 - [x] Build proof-of-concept fetcher for a single ZIP including anti-automation detection hooks. (2025-10-08 via `scripts/fetch_single_zip.py` writing to `data/raw/single_zip_runs/`.)
-- [ ] Implement stage-aware run orchestrator that reports progress, surfaces manual-intervention prompts, and stores run summaries.
-- [ ] Implement stateful deduplication and accumulator for merging records across ZIPs.
+- [x] Implement stage-aware run orchestrator that reports progress, surfaces manual-intervention prompts, and stores run summaries. (2025-10-08 via `scripts/orchestrate_zip_runs.py`.)
+- [x] Implement stateful deduplication and accumulator for merging records across ZIPs. (2025-10-08 orchestrator ingest pipeline emits `normalized_dealers.json`.)
 - [ ] Add resilient retry/backoff, logging, and manual-intervention prompts when encountering blocks.
 - [ ] Create CSV writer and validation scripts (spot-checks, summary metrics).
 - [ ] Draft README with setup, run instructions, and ethical scraping guidelines.
@@ -123,4 +129,5 @@ Last updated: 2025-10-08
 - **2025-10-08**: Executed Playwright recon for ZIPs 94105 and 90001, refreshed `scripts/capture_locator_traffic.py` selectors/response waiting, archived raw payloads under `data/raw/network/20251008_*`, and documented the dealer API envelope plus normalization considerations.
 - **2025-10-08**: Enriched CA ZIP reference data with centroid coordinates via OpenDataDE GeoJSON + USCities fallback, added manual overrides for outliers, and regenerated processed CSV/metadata.
 - **2025-10-08**: Shipped `scripts/fetch_single_zip.py`, delivering offline-centroid driven single-ZIP lookups, anti-automation detection, and normalized artifact dumps under `data/raw/single_zip_runs/`.
+- **2025-10-08**: Introduced `scripts/orchestrate_zip_runs.py`, providing stage-aware ZIP iteration, deduplicated dealer accumulation, anti-automation routing, and consolidated run artifacts under `data/raw/orchestrator_runs/`.
 - **Prior session**: Added anti-automation mitigation plan, clarified backend classification, consolidated architecture summary with automation-first recon/ZIP sourcing guidance and dedicated network capture script plan, documented operator progress reporting expectations, tightened ZIP sourcing implementation details, shipped automated CA ZIP ingestion artifacts, curated TODO backlog, scaffolded repository structure.
