@@ -30,6 +30,7 @@
 - Export pipeline (`scripts/export_normalized_dealers.py`) operational for turning `normalized_dealers.json` into CSV and metrics artifacts; validation helpers and pytest coverage confirm schema expectations.
 - Orchestrator persistence now auto-refreshes deliverables/metrics on each flush, saves `run_state.json`, and supports resumable runs via `--resume-state`/`--resume-policy` with optional blocked ZIP replay from `logs/manual_attention.log`.
 - Operator documentation refreshed: README now covers setup/run guidance and `docs/release-checklist.md` captures the pre-flight validation steps before publishing datasets.
+- Address parsing refinements now extract street/city/state/ZIP from single-line payloads, eliminate source-ZIP duplicates in the accumulator, and shrink the deliverable schema to `dealer_name/address/phone/website` for interview-ready handoffs.
 
 ## Outstanding TODO Highlights
 - Backlog cleared for this milestone; future work will be tracked via new tickets as requirements evolve.

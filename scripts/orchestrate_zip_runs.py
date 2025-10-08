@@ -47,7 +47,52 @@ from holosun_locator.exports import (
 )
 
 LOGGER = logging.getLogger("holosun.orchestrator")
-CITY_STATE_ZIP_RE = re.compile(r"^(?P<city>.*?)(?:,\s*(?P<state>[A-Z]{2}))?\s+(?P<postal>\d{5})(?:-\d{4})?$")
+CITY_STATE_ZIP_RE = re.compile(
+    r"^(?P<city>.*?)(?:,\s*(?P<state>[A-Z]{2})|\s+(?P<state_alt>[A-Z]{2}))?\s+(?P<postal>\d{5})(?:-\d{4})?$"
+)
+STATE_POSTAL_REGEX = re.compile(r"(?P<state>[A-Z]{2})\s+(?P<postal>\d{5})(?:-\d{4})?$")
+POSTAL_REGEX = re.compile(r"(\d{5})(?:-\d{4})?$")
+STREET_SUFFIX_TOKENS = {
+    "st",
+    "st.",
+    "street",
+    "ave",
+    "ave.",
+    "avenue",
+    "blvd",
+    "blvd.",
+    "boulevard",
+    "rd",
+    "rd.",
+    "road",
+    "dr",
+    "dr.",
+    "drive",
+    "way",
+    "ln",
+    "ln.",
+    "lane",
+    "pl",
+    "pl.",
+    "place",
+    "pkwy",
+    "pkwy.",
+    "parkway",
+    "hwy",
+    "hwy.",
+    "highway",
+    "ste",
+    "ste.",
+    "suite",
+    "unit",
+    "apt",
+    "apt.",
+    "bldg",
+    "ctr",
+    "center",
+    "sq",
+    "sq.",
+}
 DEFAULT_OUTPUT_DIR = Path("data/raw/orchestrator_runs")
 DEFAULT_MANUAL_LOG = Path("logs/manual_attention.log")
 DEFAULT_FLUSH_EVERY = 25
@@ -58,14 +103,19 @@ NORMALIZED_JSON_NAME = "normalized_dealers.json"
 NORMALIZED_CSV_NAME = "normalized_dealers.csv"
 DELIVERABLE_FIELDNAMES: Sequence[str] = (
     "dealer_name",
-    "street",
-    "city",
-    "state",
-    "postal_code",
+    "address",
     "phone",
     "website",
-    "source_zip",
 )
+
+
+def normalize_postal(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    match = re.search(r"\d{5}", str(value))
+    if not match:
+        return None
+    return match.group(0)
 
 
 class Stage:
@@ -113,7 +163,7 @@ class DealerAggregate:
             street=street,
             city=city,
             state=state,
-            postal_code=postal,
+            postal_code=normalize_postal(postal),
             phone=normalized.get("phone"),
             website=normalized.get("website"),
             latitude=normalized.get("latitude"),
@@ -139,7 +189,9 @@ class DealerAggregate:
         if state and not self.state:
             self.state = state
         if postal and not self.postal_code:
-            self.postal_code = postal
+            self.postal_code = normalize_postal(postal)
+        elif postal and self.postal_code and self.postal_code == normalize_postal(normalized.get("source_zip")):
+            self.postal_code = normalize_postal(postal)
         if normalized.get("phone") and not self.phone:
             self.phone = normalized.get("phone")
         if normalized.get("website") and not self.website:
@@ -202,7 +254,7 @@ class DealerAggregate:
             street=snapshot.get("street"),
             city=snapshot.get("city"),
             state=snapshot.get("state"),
-            postal_code=snapshot.get("postal_code"),
+            postal_code=normalize_postal(snapshot.get("postal_code")),
             phone=snapshot.get("phone"),
             website=snapshot.get("website"),
             latitude=snapshot.get("latitude"),
@@ -245,19 +297,97 @@ class DealerAggregate:
 
 
 def extract_address_components(normalized: Dict[str, Any]) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-    lines = list(normalized.get("address_lines") or [])
-    street = lines[0].strip() if lines else None
-    city = state = postal = None
+    lines = [line.strip() for line in (normalized.get("address_lines") or []) if line and line.strip()]
+    address_text = (normalized.get("address_text") or "").strip()
+
+    street: Optional[str] = lines[0] if lines else None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal: Optional[str] = None
+
     for line in lines[1:]:
         match = CITY_STATE_ZIP_RE.match(line.strip())
         if match:
-            city = match.group("city").strip() or None
-            state = match.group("state") or None
-            postal = match.group("postal") or None
+            city = (match.group("city") or "").strip() or city
+            state_candidate = match.group("state") or match.group("state_alt")
+            if state_candidate:
+                state = state or state_candidate
+            postal = postal or match.group("postal")
             break
-    if not postal:
-        postal = (normalized.get("record_zip") or normalized.get("source_zip") or "").strip() or None
-    return street, city, state, postal
+
+    def _apply_from_text(text: str) -> None:
+        nonlocal street, city, state, postal
+        if not text:
+            return
+
+        state_zip_match = STATE_POSTAL_REGEX.search(text)
+        if state_zip_match:
+            state = state or state_zip_match.group("state")
+            postal = postal or state_zip_match.group("postal")
+            prefix = text[: state_zip_match.start()].rstrip(", ")
+        else:
+            prefix = text
+
+        if "," in prefix:
+            parts = [part.strip() for part in prefix.split(",") if part.strip()]
+            if parts:
+                city_candidate = parts[-1]
+                street_candidate = ", ".join(parts[:-1]).strip() if len(parts) > 1 else None
+                if len(parts) == 1:
+                    tokens = city_candidate.split()
+                    city_tokens: List[str] = []
+                    while tokens:
+                        candidate = tokens[-1]
+                        candidate_lower = candidate.rstrip(".,#").lower()
+                        if any(ch.isdigit() for ch in candidate) or candidate_lower in STREET_SUFFIX_TOKENS:
+                            break
+                        city_tokens.insert(0, tokens.pop())
+                        if len(city_tokens) >= 3:
+                            break
+                    if city_tokens:
+                        city_candidate = " ".join(city_tokens)
+                        street_candidate = " ".join(tokens)
+                city_candidate = city_candidate.strip()
+                if city_candidate:
+                    city = city or city_candidate
+                if street_candidate:
+                    street_candidate = street_candidate.strip()
+                    if street_candidate:
+                        if not street or (lines and street == lines[0]):
+                            street = re.sub(r"\s{2,}", " ", street_candidate).strip(" ,")
+        else:
+            tokens = prefix.split()
+            if tokens:
+                city_tokens: List[str] = []
+                while tokens:
+                    candidate = tokens[-1]
+                    candidate_lower = candidate.rstrip(".,#").lower()
+                    if any(ch.isdigit() for ch in candidate) or candidate.endswith(('.', '#')) or candidate_lower in STREET_SUFFIX_TOKENS:
+                        break
+                    city_tokens.insert(0, tokens.pop())
+                    if len(city_tokens) >= 3:
+                        break
+                if city_tokens:
+                    city = city or " ".join(city_tokens).strip()
+                street_candidate = " ".join(tokens).strip()
+                if street_candidate:
+                    if not street or (lines and street == lines[0]):
+                        street = re.sub(r"\s{2,}", " ", street_candidate).strip(" ,")
+
+        if not postal:
+            zip_match = POSTAL_REGEX.search(text)
+            if zip_match:
+                postal = postal or zip_match.group(1)
+
+    _apply_from_text(address_text)
+
+    if lines and not street:
+        street = lines[0]
+
+    postal = normalize_postal(postal or normalized.get("record_zip") or normalized.get("source_zip"))
+    state = state or (state_zip_match.group("state") if (state_zip_match := STATE_POSTAL_REGEX.search(address_text)) else None)
+
+    return (street.strip() if street else None), (city.strip() if city else None), state, postal
 
 
 class DealerAccumulator:
@@ -331,24 +461,34 @@ def build_deliverable_rows(
 
     rows: List[Dict[str, Any]] = []
     for dealer in dealers:
-        source_zips = dealer.get("source_zips") or []
-        if isinstance(source_zips, (list, tuple)):
-            source_zip_value = list_delimiter.join(str(zip_code) for zip_code in source_zips if zip_code)
-        elif source_zips is None:
-            source_zip_value = ""
-        else:
-            source_zip_value = str(source_zips)
+        address_parts: List[str] = []
+        street = dealer.get("street")
+        city = dealer.get("city")
+        state = dealer.get("state")
+        postal = dealer.get("postal_code")
+
+        if street:
+            address_parts.append(str(street))
+
+        locality_parts = [part for part in [city, state] if part]
+        if postal:
+            locality = ", ".join(locality_parts) if locality_parts else ""
+            if locality:
+                locality = f"{locality} {postal}"
+            else:
+                locality = postal
+            address_parts.append(locality)
+        elif locality_parts:
+            address_parts.append(", ".join(locality_parts))
+
+        address_display = ", ".join(part for part in address_parts if part)
 
         rows.append(
             {
                 "dealer_name": dealer.get("dealer_name") or "",
-                "street": dealer.get("street") or "",
-                "city": dealer.get("city") or "",
-                "state": dealer.get("state") or "",
-                "postal_code": dealer.get("postal_code") or "",
+                "address": address_display,
                 "phone": dealer.get("phone") or "",
                 "website": dealer.get("website") or "",
-                "source_zip": source_zip_value,
             }
         )
     return rows
@@ -360,7 +500,7 @@ def compute_dealer_id(dealer: Dict[str, Any]) -> str:
         (dealer.get("dealer_name") or "").strip().lower(),
         (street or "").strip().lower(),
         (city or "").strip().lower(),
-        (postal or "").strip(),
+        (normalize_postal(postal) or "").strip(),
     ]
     digest_input = "|".join(parts).encode("utf-8")
     return hashlib.sha256(digest_input).hexdigest()
@@ -1132,3 +1272,12 @@ def main() -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+def normalize_postal(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    match = re.search(r"\d{5}", str(value))
+    if not match:
+        return None
+    return match.group(0)

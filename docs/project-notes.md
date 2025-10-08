@@ -136,6 +136,7 @@ Last updated: 2025-10-09
 - Confirm whether downstream consumers expect geocoding or map visualization (currently out of scope).
 
 ## Change Log
+- **2025-10-08**: Hardened address parsing + dedup logic (proper city/state/ZIP extraction, removal of source ZIP from deliverable, address-only CSV output), added regression tests, and verified clean-room rerun workflow.
 - **2025-10-08**: Enabled orchestrator resume/replay tooling (`--resume-state`, `--resume-policy`, `--include-manual-log`), wired automatic deliverable + metrics refresh on each flush/finalization, added pytest coverage for resume helpers, and drafted operator-facing README + release checklist.
 - **2025-10-08**: Documented the final handoff CSV schema, outlined incremental batch flushing + resume strategy, and planned automatic exporter/metrics hooks inside the orchestrator.
 - **2025-10-08**: Hardened the run orchestrator with configurable retry/backoff plus interactive prompts, added CSV export/validation tooling with metrics JSON output, and introduced pytest coverage for the exporter utilities.

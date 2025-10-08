@@ -55,7 +55,7 @@ What to expect:
   - `run_state.json` tracks progress during the run.
   - `run_summary.json` appears at completion.
   - `normalized_dealers.json` / `normalized_dealers.csv` hold full normalized records.
-  - `holosun_ca_dealers.csv` (trimmed deliverable) and `<deliverable>.metrics.json` expose final outputs.
+  - `holosun_ca_dealers.csv` (trimmed deliverable with columns `dealer_name`, `address`, `phone`, `website`) and `<deliverable>.metrics.json` expose final outputs. Deliverables remain inside the run directory; copy them to `data/processed/` if you need a consolidated handoff.
   - When `--skip-raw` is omitted, `zip_runs/<zip>` folders store per-ZIP artifacts.
 - Metrics log lines similar to `Metrics snapshot: total=185, unique=175, with_phone=140` during each flush.
 

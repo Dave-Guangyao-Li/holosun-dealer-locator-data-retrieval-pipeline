@@ -53,7 +53,7 @@ python scripts/orchestrate_zip_runs.py \
 - 生成运行目录 `data/raw/orchestrator_runs/<run_id>/`，例如 `20251009T023000Z/`，包含：
   - `run_state.json`（运行时进度快照）与 `run_summary.json`（结束后写入）。
   - `normalized_dealers.json` / `normalized_dealers.csv`（完整标准化结果）。
-  - `holosun_ca_dealers.csv`（精简交付 CSV）及 `<deliverable>.metrics.json`（度量信息）。
+  - `holosun_ca_dealers.csv`（精简交付 CSV，字段为 `dealer_name`、`address`、`phone`、`website`）及 `<deliverable>.metrics.json`（度量信息）。交付物默认位于运行目录内，如需集中存放可复制到 `data/processed/`。
   - 若未使用 `--skip-raw`，`zip_runs/<zip>` 目录内保留每个邮编的原始请求/响应工件。
 - 每次批量刷新会打印类似 `Metrics snapshot: total=185, unique=175, with_phone=140` 的统计行。
 
