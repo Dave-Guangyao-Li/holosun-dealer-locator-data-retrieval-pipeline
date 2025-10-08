@@ -66,9 +66,14 @@ Last updated: 2025-10-08
 
 ## Geocoding Strategy Decision (2025-10-08)
 - The Holosun frontend geocodes ZIPs through Google Maps at runtime, but relying on that flow would keep our automation tethered to an external API and introduce nondeterministic lat/lng drift.
-- Our existing `data/processed/ca_zip_codes.csv` lacks coordinates, so we will enrich it with ZIP centroid latitude/longitude from an offline open dataset (e.g., OpenDataDE ZCTA centroids) during ingestion.
+- We enriched `data/processed/ca_zip_codes.csv` with offline centroids during ingestion so the pipeline can submit requests without hitting third-party geocoders.
 - Playwright recon remains useful for capturing request payloads, yet the proof-of-concept fetcher will submit requests directly with the offline coordinates to avoid browser automation and third-party lookups during full runs.
 - Holosun response coordinates stay authoritative for dealer point locations; the ZIP centroid is purely a request input and can be logged separately for transparency.
+
+## ZIP Centroid Enrichment (2025-10-08)
+- Updated `scripts/fetch_ca_zip_codes.py` to hydrate latitude/longitude from the OpenDataDE CA ZIP GeoJSON dataset, fall back to the nationwide USCities JSON file for non-ZCTA ZIPs, and apply a manual override for `91719` (Corona) using OSM Nominatim coordinates.
+- Regenerated `data/processed/ca_zip_codes.csv` with populated `latitude`/`longitude` columns for all 1,678 California ZIPs; metadata now records both centroid sources and the override policy.
+- Script logs flag non-standard placeholder ZIPs and surfaces counts for missing centroid matches so future source drift is immediately visible to operators.
 
 ## Operator Feedback and Progress Reporting
 - Provide a high-level run controller that surfaces stage-based updates (e.g., collecting ZIPs, submitting locator requests, normalizing data, exporting CSV) to stdout and structured logs.
@@ -99,7 +104,7 @@ Last updated: 2025-10-08
 - [ ] Create CSV writer and validation scripts (spot-checks, summary metrics).
 - [ ] Draft README with setup, run instructions, and ethical scraping guidelines.
 - [ ] Prepare release checklist (data validation, documentation updates, final CSV verification).
-- [ ] Enrich `data/processed/ca_zip_codes.csv` with offline ZIP centroid latitude/longitude for request payloads.
+- [x] Enriched `data/processed/ca_zip_codes.csv` with offline ZIP centroid latitude/longitude for request payloads (2025-10-08).
 
 ## Risks and Open Questions
 - Anti-automation defenses may require human-in-the-loop operations; need clarity on acceptable manual steps for the assignment.
@@ -110,4 +115,5 @@ Last updated: 2025-10-08
 
 ## Change Log
 - **2025-10-08**: Executed Playwright recon for ZIPs 94105 and 90001, refreshed `scripts/capture_locator_traffic.py` selectors/response waiting, archived raw payloads under `data/raw/network/20251008_*`, and documented the dealer API envelope plus normalization considerations.
+- **2025-10-08**: Enriched CA ZIP reference data with centroid coordinates via OpenDataDE GeoJSON + USCities fallback, added manual overrides for outliers, and regenerated processed CSV/metadata.
 - **Prior session**: Added anti-automation mitigation plan, clarified backend classification, consolidated architecture summary with automation-first recon/ZIP sourcing guidance and dedicated network capture script plan, documented operator progress reporting expectations, tightened ZIP sourcing implementation details, shipped automated CA ZIP ingestion artifacts, curated TODO backlog, scaffolded repository structure.

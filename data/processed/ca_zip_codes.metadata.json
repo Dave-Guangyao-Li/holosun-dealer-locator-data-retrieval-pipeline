@@ -1,6 +1,6 @@
 {
   "source_url": "https://raw.githubusercontent.com/scpike/us-state-county-zip/master/geo-data.csv",
-  "retrieved_at": "2025-10-08T02:18:02.729374Z",
+  "retrieved_at": "2025-10-08T10:44:19.154371Z",
   "record_count": 1678,
   "fields": [
     "zip",
@@ -10,5 +10,7 @@
     "latitude",
     "longitude"
   ],
-  "notes": "Dataset sourced from scpike/us-state-county-zip GitHub repository."
+  "centroid_source_url": "https://raw.githubusercontent.com/OpenDataDE/State-zip-code-GeoJSON/master/ca_california_zip_codes_geo.min.json",
+  "fallback_centroid_source_url": "https://raw.githubusercontent.com/millbj92/US-Zip-Codes-JSON/master/USCities.json",
+  "notes": "Dataset sourced from scpike/us-state-county-zip, OpenDataDE centroid GeoJSON, USCities JSON fallback repositories, plus manual overrides for select non-ZCTA ZIPs."
 }
