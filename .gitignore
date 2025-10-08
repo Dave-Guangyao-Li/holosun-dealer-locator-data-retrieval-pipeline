@@ -20,6 +20,8 @@ data/raw/*
 
 data/processed/*
 !data/processed/.gitkeep
+!data/processed/ca_zip_codes.csv
+!data/processed/ca_zip_codes.metadata.json
 
 # Logs (keep placeholder)
 logs/*

@@ -1,0 +1,14 @@
+{
+  "source_url": "https://raw.githubusercontent.com/scpike/us-state-county-zip/master/geo-data.csv",
+  "retrieved_at": "2025-10-08T02:18:02.729374Z",
+  "record_count": 1678,
+  "fields": [
+    "zip",
+    "city",
+    "state",
+    "county",
+    "latitude",
+    "longitude"
+  ],
+  "notes": "Dataset sourced from scpike/us-state-county-zip GitHub repository."
+}

@@ -19,8 +19,9 @@ Last updated: current session
    - Maintain a dedicated script (see `scripts/capture_locator_traffic.py`) that runs headless, records request/response pairs to `data/raw/network/`, and emits a YAML summary for analysis.
    - Record any anti-bot signals (CAPTCHA, session tokens) and define how the automation will surface them to the operator.
 2. **ZIP Code Provider**
-   - Automate retrieval of a canonical California ZIP list from trusted open data (e.g., public Opendatasoft API, Census downloads) using a lightweight ingestion script committed to `scripts/`.
-   - Persist as CSV/JSON and expose as reusable iterator in code; include checks that validate counts and de-duplicate entries.
+   - Automate retrieval of a canonical California ZIP list from trusted open data (currently the `scpike/us-state-county-zip` GitHub dataset) using a lightweight ingestion script committed to `scripts/fetch_ca_zip_codes.py`.
+   - Store fetched records in `data/processed/ca_zip_codes.csv` alongside a JSON metadata file that captures source URL, retrieval timestamp, and record count for auditability.
+   - Persist as CSV/JSON and expose as reusable iterator in code; include checks that validate counts, required columns (ZIP, city, county), and de-duplicate entries prior to export while skipping non-standard ZIP placeholders.
 3. **Retrieval Layer**
    - Preferred: Playwright (Python) to submit ZIPs, intercept XHR responses, and save raw dealer payloads.
    - Alternate: direct HTTP client (requests/httpx) if locator API is replayable.
@@ -56,7 +57,7 @@ Last updated: current session
 
 ## TODO Backlog
 - [ ] Capture live network behavior of the dealer locator via `scripts/capture_locator_traffic.py`, storing request/response payloads and annotated summaries.
-- [ ] Compile authoritative list of California ZIP codes; validate counts and deduplicate.
+- [x] Implemented `scripts/fetch_ca_zip_codes.py` to download and validate California ZIP data, exporting to `data/processed/ca_zip_codes.csv` with source metadata.
 - [ ] Define dealer data model, normalization rules, and deduplication key strategy.
 - [ ] Build proof-of-concept fetcher for a single ZIP including anti-automation detection hooks.
 - [ ] Implement stage-aware run orchestrator that reports progress, surfaces manual-intervention prompts, and stores run summaries.
@@ -74,4 +75,4 @@ Last updated: current session
 - Confirm whether downstream consumers expect geocoding or map visualization (currently out of scope).
 
 ## Change Log
-- **Current session**: Added anti-automation mitigation plan, clarified backend classification, consolidated architecture summary with automation-first recon/ZIP sourcing guidance and dedicated network capture script plan, documented operator progress reporting expectations, curated TODO backlog, scaffolded repository structure.
+- **Current session**: Added anti-automation mitigation plan, clarified backend classification, consolidated architecture summary with automation-first recon/ZIP sourcing guidance and dedicated network capture script plan, documented operator progress reporting expectations, tightened ZIP sourcing implementation details, shipped automated CA ZIP ingestion artifacts, curated TODO backlog, scaffolded repository structure.
